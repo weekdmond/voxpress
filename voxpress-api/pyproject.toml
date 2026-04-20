@@ -1,0 +1,44 @@
+[project]
+name = "voxpress-api"
+version = "0.4.0"
+description = "VoxPress backend — FastAPI + Postgres + async pipeline"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "sqlalchemy[asyncio]>=2.0.36",
+  "asyncpg>=0.29",
+  "alembic>=1.13",
+  "pydantic>=2.9",
+  "pydantic-settings>=2.6",
+  "sse-starlette>=2.1",
+  "httpx[socks]>=0.27",
+  "python-multipart>=0.0.9",
+  "yt-dlp>=2026.3.17",
+  "mlx-whisper>=0.4.3",
+  "mistune>=3.2.0",
+  "playwright>=1.58.0",
+  "playwright-stealth>=2.0.3",
+  "patchright>=1.58.2",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+  "ruff>=0.7",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["voxpress"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

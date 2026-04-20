@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxPress · Frontend Handoff</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: var(--vp-font-sans);
+    background: var(--vp-bg);
+    color: var(--vp-ink);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: var(--vp-font-mono); }
+
+  .shell { max-width: 1120px; margin: 0 auto; padding: 64px 40px 120px; }
+
+  /* Hero */
+  .hero {
+    padding-bottom: 40px;
+    border-bottom: 1px solid var(--vp-line-2);
+    margin-bottom: 40px;
+  }
+  .kicker {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--vp-font-mono);
+    font-size: 11px;
+    color: var(--vp-ink-3);
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    padding: 5px 10px;
+    border: 1px solid var(--vp-line);
+    border-radius: 999px;
+    background: #fff;
+  }
+  .kicker .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--vp-accent); box-shadow: 0 0 0 3px var(--vp-accent-soft); }
+  h1 {
+    font-size: 44px;
+    letter-spacing: -0.03em;
+    font-weight: 600;
+    margin: 20px 0 12px;
+    line-height: 1.1;
+  }
+  h1 .accent { color: var(--vp-accent-2); }
+  .tagline { font-size: 16px; color: var(--vp-ink-2); max-width: 640px; margin: 0; }
+
+  .meta-row {
+    display: flex; gap: 24px; margin-top: 32px;
+    font-family: var(--vp-font-mono); font-size: 11.5px;
+    color: var(--vp-ink-3);
+  }
+  .meta-row b { color: var(--vp-ink); font-weight: 500; }
+
+  /* Sections */
+  h2 {
+    font-size: 12px;
+    font-family: var(--vp-font-mono);
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    color: var(--vp-ink-3);
+    font-weight: 500;
+    margin: 48px 0 16px;
+  }
+
+  /* Doc grid */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  .card {
+    display: block;
+    padding: 22px 24px;
+    background: #fff;
+    border: 1px solid var(--vp-line);
+    border-radius: 10px;
+    text-decoration: none;
+    color: inherit;
+    transition: all 140ms ease;
+    position: relative;
+  }
+  .card:hover {
+    border-color: var(--vp-ink-3);
+    transform: translateY(-1px);
+    box-shadow: var(--vp-shadow-md);
+  }
+  .card .num {
+    font-family: var(--vp-font-mono);
+    font-size: 10.5px;
+    color: var(--vp-ink-3);
+    letter-spacing: .08em;
+    margin-bottom: 10px;
+  }
+  .card h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0 0 6px;
+    letter-spacing: -0.01em;
+  }
+  .card p {
+    font-size: 13px;
+    color: var(--vp-ink-2);
+    margin: 0;
+  }
+  .card .arrow {
+    position: absolute;
+    right: 20px; top: 22px;
+    color: var(--vp-ink-3);
+    font-family: var(--vp-font-mono);
+    transition: transform 140ms ease;
+  }
+  .card:hover .arrow { transform: translateX(4px); color: var(--vp-accent-2); }
+
+  /* Asset list */
+  .assets {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1px;
+    background: var(--vp-line);
+    border: 1px solid var(--vp-line);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .asset {
+    display: flex; align-items: center; gap: 14px;
+    padding: 16px 20px;
+    background: #fff;
+    text-decoration: none;
+    color: inherit;
+    transition: background 120ms ease;
+  }
+  .asset:hover { background: var(--vp-bg-2); }
+  .asset .ico {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    background: var(--vp-bg-2);
+    border: 1px solid var(--vp-line);
+    display: grid; place-items: center;
+    font-family: var(--vp-font-mono); font-size: 10px; color: var(--vp-ink-2);
+    flex-shrink: 0;
+  }
+  .asset .info { flex: 1; min-width: 0; }
+  .asset .info b { display: block; font-size: 13px; font-weight: 500; }
+  .asset .info span { display: block; font-family: var(--vp-font-mono); font-size: 10.5px; color: var(--vp-ink-3); margin-top: 2px; }
+
+  /* Quick start */
+  .quick {
+    background: var(--vp-ink);
+    color: #f8fafc;
+    border-radius: 10px;
+    padding: 28px 32px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 32px;
+  }
+  .quick h3 { color: #fff; font-size: 15px; margin: 0 0 14px; letter-spacing: -0.01em; }
+  .quick ol { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.8; color: #cbd5e1; }
+  .quick ol li a { color: #fff; text-decoration: none; border-bottom: 1px solid rgba(255,255,255,0.25); }
+  .quick ol li a:hover { border-bottom-color: #fff; }
+  .quick code {
+    font-family: var(--vp-font-mono);
+    font-size: 11.5px;
+    background: rgba(255,255,255,0.08);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+
+  /* Prototype banner */
+  .proto {
+    display: flex; align-items: center; gap: 20px;
+    padding: 18px 22px;
+    border: 1px solid var(--vp-line);
+    border-radius: 10px;
+    background: #fff;
+    margin-top: 16px;
+    text-decoration: none;
+    color: inherit;
+    transition: all 140ms ease;
+  }
+  .proto:hover { border-color: var(--vp-accent-2); box-shadow: var(--vp-shadow-md); }
+  .proto .p-ico {
+    width: 44px; height: 44px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--vp-accent) 0%, var(--vp-accent-2) 100%);
+    display: grid; place-items: center;
+    color: #fff; font-family: var(--vp-font-mono); font-weight: 600; font-size: 15px;
+    flex-shrink: 0;
+  }
+  .proto .p-info { flex: 1; }
+  .proto .p-info b { display: block; font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+  .proto .p-info span { font-family: var(--vp-font-mono); font-size: 11px; color: var(--vp-ink-3); }
+  .proto .arrow { color: var(--vp-ink-3); font-family: var(--vp-font-mono); }
+
+  /* Footer */
+  footer {
+    margin-top: 80px;
+    padding-top: 24px;
+    border-top: 1px solid var(--vp-line-2);
+    font-family: var(--vp-font-mono);
+    font-size: 11px;
+    color: var(--vp-ink-3);
+    display: flex; justify-content: space-between;
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <section class="hero">
+    <span class="kicker"><span class="dot"></span>FRONTEND HANDOFF · v0.4</span>
+    <h1>VoxPress <span class="accent">Frontend Handoff</span></h1>
+    <p class="tagline">抖音博主内容索引器 · 把 <code class="mono">VoxPress v3 (高保真).html</code> 拆解成可直接照抄的设计系统 + 页面规格 + 后端契约。交给 Claude Code / Cursor / 人类工程师，从零搭出 1:1 还原的 React + Vite 项目。</p>
+    <div class="meta-row">
+      <span>栈 · <b>React 18 · TS · Vite · TanStack Query</b></span>
+      <span>后端 · <b>Postgres · Ollama · SSE</b></span>
+      <span>文档 · <b>7 份 MD + 3 份资源</b></span>
+    </div>
+  </section>
+
+  <!-- Prototype link -->
+  <h2>视觉基准</h2>
+  <a class="proto" href="../VoxPress v3 (高保真).html" target="_blank">
+    <div class="p-ico">V3</div>
+    <div class="p-info">
+      <b>VoxPress v3 · 高保真原型</b>
+      <span>所有颜色 / 间距 / 组件 / 交互的 ground truth · 点击新开</span>
+    </div>
+    <span class="arrow">→</span>
+  </a>
+
+  <!-- Docs -->
+  <h2>文档 · 按依赖顺序</h2>
+  <div class="grid">
+    <a class="card" href="01-architecture.md">
+      <div class="num">01</div>
+      <h3>Architecture</h3>
+      <p>项目结构、技术栈、路由、目录约定</p>
+      <span class="arrow">→</span>
+    </a>
+    <a class="card" href="02-design-tokens.md">
+      <div class="num">02</div>
+      <h3>Design Tokens</h3>
+      <p>颜色 · 字体 · 间距 · 圆角 · 阴影 · 动画时长</p>
+      <span class="arrow">→</span>
+    </a>
+    <a class="card" href="03-components.md">
+      <div class="num">03</div>
+      <h3>Components</h3>
+      <p>Button / Input / Chip / Avatar / TaskCard · 20+ 个组件的 API</p>
+      <span class="arrow">→</span>
+    </a>
+    <a class="card" href="04-pages.md">
+      <div class="num">04</div>
+      <h3>Pages</h3>
+      <p>Home / Library / Articles / Article / Import / Settings 规格</p>
+      <span class="arrow">→</span>
+    </a>
+    <a class="card" href="05-api-schema.md">
+      <div class="num">05</div>
+      <h3>API Schema</h3>
+      <p>REST endpoints · SSE 事件 · TypeScript 类型 · 错误码</p>
+      <span class="arrow">→</span>
+    </a>
+    <a class="card" href="06-data-models.md">
+      <div class="num">06</div>
+      <h3>Data Models</h3>
+      <p>Postgres DDL · 索引 · 视图 · 清理 job</p>
+      <span class="arrow">→</span>
+    </a>
+    <a class="card" href="07-interactions.md" style="grid-column: span 2;">
+      <div class="num">07</div>
+      <h3>Interactions</h3>
+      <p>路由持久化 · Tweaks 协议 · 快捷键 · 加载/空/错三态 · 无障碍</p>
+      <span class="arrow">→</span>
+    </a>
+  </div>
+
+  <!-- Assets -->
+  <h2>资源文件 · 可直接 import</h2>
+  <div class="assets">
+    <a class="asset" href="tokens.css">
+      <div class="ico">CSS</div>
+      <div class="info">
+        <b>tokens.css</b>
+        <span>30+ CSS 变量 · 灰阶 + 蓝 + 字体栈</span>
+      </div>
+    </a>
+    <a class="asset" href="tokens.json">
+      <div class="ico">JSON</div>
+      <div class="info">
+        <b>tokens.json</b>
+        <span>喂给 Tailwind / Style Dictionary</span>
+      </div>
+    </a>
+    <a class="asset" href="icons.svg" style="grid-column: span 2;">
+      <div class="ico">SVG</div>
+      <div class="info">
+        <b>icons.svg</b>
+        <span>18 个自绘图标 sprite · 无外部依赖 · &lt;use href="/icons.svg#i-home" /&gt;</span>
+      </div>
+    </a>
+  </div>
+
+  <!-- Quick start -->
+  <h2>最短路径</h2>
+  <div class="quick">
+    <div>
+      <h3>给 Claude Code / Cursor</h3>
+      <ol>
+        <li>把整个 <code>handoff/</code> 喂给 agent</li>
+        <li>让它先读 <a href="01-architecture.md">01-architecture</a> 建骨架</li>
+        <li><code>tokens.css</code> + <code>icons.svg</code> 复制进 <code>/public</code></li>
+        <li>按 <a href="03-components.md">03-components</a> 顺序落组件</li>
+        <li>按 <a href="04-pages.md">04-pages</a> 拼页面</li>
+        <li>用 MSW mock <a href="05-api-schema.md">05-api</a> 跑前端，后端并行</li>
+      </ol>
+    </div>
+    <div>
+      <h3>给人类工程师</h3>
+      <ol>
+        <li>先在新窗口开 <a href="../VoxPress v3 (高保真).html" target="_blank">v3 原型</a> 当对照</li>
+        <li>用本页作为索引，按需跳转文档</li>
+        <li>有疑问直接回到原型 devtools 看元素</li>
+        <li>所有尺寸 / 颜色都用 token，不要写 magic number</li>
+        <li>Tweaks 面板是内置开发工具，见 <a href="07-interactions.md">07-interactions</a></li>
+      </ol>
+    </div>
+  </div>
+
+  <footer>
+    <span>voxpress-frontend-handoff · 7 docs · 3 assets</span>
+    <span>1:1 · tokens from prototype · no magic numbers</span>
+  </footer>
+
+</div>
+</body>
+</html>

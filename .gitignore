@@ -1,0 +1,41 @@
+# Secrets / local config
+.env
+.env.local
+*.env.local
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+.vite/
+*.log
+*.tsbuildinfo
+
+# Build artifacts
+build/
+out/
+coverage/
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Project-specific
+VoxPress.zip
+/tmp/
+smoke_pipeline.py
+/voxpress-api/smoke_pipeline.py
+
+# Alembic lockfiles (generated migrations are kept)
+# (nothing here; versions/ are tracked)

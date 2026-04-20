@@ -1,0 +1,41 @@
+body {
+  font-family: var(--vp-font-sans);
+  background: var(--vp-bg);
+  color: var(--vp-ink);
+  font-size: var(--vp-text-base);
+  line-height: var(--vp-leading-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body.serif .reader-article p,
+body.serif .reader-article li {
+  font-family: var(--vp-font-serif);
+}
+
+.mono {
+  font-family: var(--vp-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Shimmer animation for progress and skeletons */
+@keyframes vp-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes vp-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@keyframes vp-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Global focus ring — tokens use it inside components too */
+:focus-visible {
+  outline: none;
+}
+
+/* Toast positioning is handled by sonner */

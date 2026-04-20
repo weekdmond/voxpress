@@ -1,0 +1,15 @@
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 500;
+  flex-shrink: 0;
+  overflow: hidden;
+  user-select: none;
+  letter-spacing: -0.01em;
+}
+.xs { width: 18px; height: 18px; border-radius: 50%; font-size: 8.5px; font-weight: 600; }
+.sm { width: 24px; height: 24px; border-radius: 50%; font-size: 10px; font-weight: 600; }
+.md { width: 32px; height: 32px; border-radius: 50%; font-size: 12px; font-weight: 600; }
+.lg { width: 52px; height: 52px; border-radius: var(--vp-radius-xl); font-size: 18px; font-weight: 600; }

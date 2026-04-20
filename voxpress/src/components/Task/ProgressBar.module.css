@@ -1,0 +1,29 @@
+.wrap {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  background: var(--vp-bg-2);
+  border-radius: var(--vp-radius-full);
+  overflow: hidden;
+}
+.fill {
+  height: 100%;
+  background: var(--vp-accent);
+  border-radius: var(--vp-radius-full);
+  transition: width var(--vp-duration-slow) var(--vp-ease);
+}
+.accent {
+  background: linear-gradient(90deg, var(--vp-accent), var(--vp-accent-2));
+}
+.active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.55),
+    transparent
+  );
+  animation: vp-shimmer 1.6s linear infinite;
+}

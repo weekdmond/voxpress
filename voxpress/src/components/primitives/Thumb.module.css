@@ -1,0 +1,21 @@
+.thumb {
+  position: relative;
+  border-radius: var(--vp-radius-sm);
+  flex-shrink: 0;
+  background-size: cover;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.play {
+  position: absolute;
+  color: rgba(255, 255, 255, 0.92);
+  filter: drop-shadow(0 1px 2px rgba(15, 20, 25, 0.35));
+}
+.highlight {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 20% 18%, rgba(255, 255, 255, 0.35), transparent 60%);
+  pointer-events: none;
+}

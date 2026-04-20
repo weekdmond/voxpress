@@ -1,0 +1,116 @@
+/* VoxPress Design Tokens · v3
+ * Copy to: src/styles/tokens.css
+ * Source: VoxPress v3 (高保真).html
+ */
+
+:root {
+  /* ─────────── Backgrounds & Surfaces ─────────── */
+  --vp-bg:         #f4f5f7;  /* app background (cool slate) */
+  --vp-bg-2:       #eceef2;  /* secondary surface, hover fills */
+  --vp-panel:      #ffffff;  /* cards, sidebar, inputs */
+
+  /* ─────────── Ink (text) ─────────── */
+  --vp-ink:        #0f1419;  /* primary text */
+  --vp-ink-2:      #3d4550;  /* secondary text */
+  --vp-ink-3:      #7b8594;  /* tertiary / placeholders / icons */
+  --vp-ink-4:      #b6bdc8;  /* disabled, dividers in text context */
+
+  /* ─────────── Lines & Borders ─────────── */
+  --vp-line:        #e2e5eb; /* default border */
+  --vp-line-2:      #eef0f4; /* soft divider */
+  --vp-line-strong: #d0d5de; /* hover border */
+
+  /* ─────────── Accent (cool slate blue) ─────────── */
+  --vp-accent:      #4f5d75;
+  --vp-accent-2:    #2d3748; /* primary buttons, active nav */
+  --vp-accent-soft: #eef1f6;
+  --vp-accent-tint: #dde3ec;
+
+  /* ─────────── Semantic ─────────── */
+  --vp-ok:        #4a7c59;
+  --vp-ok-soft:   #e8efe9;
+  --vp-warn:      #9c6f1e;
+  --vp-warn-soft: #f6efdf;
+  --vp-danger:    #9c4a4a;
+
+  /* ─────────── Gradients (deterministic) ─────────── */
+  --vp-hatch: linear-gradient(135deg, #e8ebf0 0%, #dde1e8 100%);
+
+  /* ─────────── Shadows ─────────── */
+  --vp-shadow-sm: 0 1px 2px rgba(15,20,25,0.04), 0 1px 1px rgba(15,20,25,0.02);
+  --vp-shadow-md: 0 2px 8px rgba(15,20,25,0.05), 0 1px 3px rgba(15,20,25,0.03);
+  --vp-shadow-lg: 0 12px 32px rgba(15,20,25,0.08), 0 2px 6px rgba(15,20,25,0.04);
+
+  /* ─────────── Radius ─────────── */
+  --vp-radius-sm: 4px;
+  --vp-radius:    6px;
+  --vp-radius-md: 8px;
+  --vp-radius-lg: 10px;
+  --vp-radius-xl: 12px;
+  --vp-radius-full: 999px;
+
+  /* ─────────── Spacing (4-based) ─────────── */
+  --vp-space-1: 4px;
+  --vp-space-2: 8px;
+  --vp-space-3: 12px;
+  --vp-space-4: 16px;
+  --vp-space-5: 20px;
+  --vp-space-6: 24px;
+  --vp-space-7: 28px;
+  --vp-space-8: 32px;
+  --vp-space-10: 40px;
+  --vp-space-12: 48px;
+  --vp-space-16: 64px;
+
+  /* ─────────── Type ─────────── */
+  --vp-font-sans: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+  --vp-font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --vp-font-serif: 'Instrument Serif', 'Noto Serif SC', Georgia, serif;
+
+  --vp-text-xs:   11px;
+  --vp-text-sm:   12px;
+  --vp-text-base: 13.5px;
+  --vp-text-md:   14px;
+  --vp-text-lg:   16px;
+  --vp-text-xl:   19px;
+  --vp-text-2xl:  22px;
+  --vp-text-3xl:  26px;
+  --vp-text-4xl:  32px;
+
+  --vp-leading-tight:  1.2;
+  --vp-leading-snug:   1.4;
+  --vp-leading-normal: 1.55;
+  --vp-leading-relaxed: 1.7;
+  --vp-leading-loose:  1.8;
+
+  --vp-tracking-tight:  -0.02em;
+  --vp-tracking-snug:   -0.015em;
+  --vp-tracking-normal: 0;
+  --vp-tracking-wide:   0.06em;
+  --vp-tracking-wider:  0.1em;
+
+  /* ─────────── Layout ─────────── */
+  --vp-sidebar-w: 232px;
+  --vp-main-max:  1320px;
+  --vp-main-px:   40px;
+  --vp-main-py:   28px;
+
+  /* ─────────── Motion ─────────── */
+  --vp-ease:        cubic-bezier(0.4, 0, 0.2, 1);
+  --vp-duration-fast:   120ms;
+  --vp-duration-normal: 150ms;
+  --vp-duration-slow:   400ms;
+
+  /* ─────────── Density-overridable ─────────── */
+  --vp-gap: 14px;
+  --vp-pad: 18px;
+}
+
+/* Compact density — toggled by <body class="density-compact"> */
+body.density-compact {
+  --vp-gap: 10px;
+  --vp-pad: 14px;
+}
+
+/* Dark mode — NOT in MVP but reserved */
+/* @media (prefers-color-scheme: dark) { ... } */

@@ -1,0 +1,56 @@
+.wrap {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  background: var(--vp-panel);
+  border: 1px solid var(--vp-line);
+  border-radius: var(--vp-radius-md);
+  padding: 14px 16px;
+  box-shadow: var(--vp-shadow-sm);
+}
+.step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.badge {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--vp-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--vp-bg-2);
+  color: var(--vp-ink-3);
+  flex-shrink: 0;
+}
+.done .badge {
+  background: var(--vp-ok-soft);
+  color: var(--vp-ok);
+}
+.current .badge {
+  background: var(--vp-accent-2);
+  color: #fff;
+}
+.labelWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.kicker {
+  font-family: var(--vp-font-mono);
+  font-size: 10px;
+  color: var(--vp-ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--vp-ink);
+}
+.current .label { color: var(--vp-ink); font-weight: 600; }
+.done .label { color: var(--vp-ink-2); }

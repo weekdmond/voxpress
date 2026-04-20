@@ -1,0 +1,42 @@
+.shell {
+  display: grid;
+  grid-template-columns: var(--vp-sidebar-w) minmax(0, 1fr);
+  min-height: 100vh;
+  background: var(--vp-bg);
+}
+.main {
+  min-width: 0;
+  padding: var(--vp-main-py) var(--vp-main-px) 80px;
+  max-width: var(--vp-main-max);
+}
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.pageHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--vp-line-2);
+  flex-wrap: wrap;
+}
+.pageTitle {
+  font-size: var(--vp-text-3xl);
+  font-weight: 600;
+  letter-spacing: var(--vp-tracking-tight);
+  line-height: var(--vp-leading-tight);
+  color: var(--vp-ink);
+}
+.pageMeta {
+  font-family: var(--vp-font-mono);
+  font-size: 11px;
+  color: var(--vp-ink-3);
+  line-height: 1.4;
+  display: inline-flex;
+  gap: 12px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}

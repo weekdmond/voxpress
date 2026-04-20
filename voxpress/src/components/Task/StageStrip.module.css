@@ -1,0 +1,32 @@
+.strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 10px;
+  background: var(--vp-bg-2);
+  border-radius: var(--vp-radius-full);
+  font-size: 10.5px;
+  font-family: var(--vp-font-mono);
+  color: var(--vp-ink-3);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  transition: all var(--vp-duration-fast) var(--vp-ease);
+}
+.done {
+  background: var(--vp-ok-soft);
+  color: var(--vp-ok);
+}
+.current {
+  background: var(--vp-accent-2);
+  color: #fff;
+}
+.failed {
+  background: #fae3e3;
+  color: var(--vp-danger);
+}

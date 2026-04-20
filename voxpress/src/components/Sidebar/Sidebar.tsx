@@ -1,0 +1,96 @@
+import { NavLink, useLocation } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { Icon } from '@/components/primitives';
+import { Avatar } from '@/components/primitives';
+import { api } from '@/lib/api';
+import type { Creator, Page } from '@/types/api';
+import type { IconName } from '@/components/primitives';
+import s from './Sidebar.module.css';
+import { useSseStatus } from '@/features/tasks/useSseStatus';
+
+interface NavItem {
+  to: string;
+  label: string;
+  icon: IconName;
+  end?: boolean;
+  count?: number;
+}
+
+export function Sidebar() {
+  const loc = useLocation();
+
+  const { data: creators } = useQuery({
+    queryKey: ['creators', 'sidebar'],
+    queryFn: () => api.get<Page<Creator>>('/api/creators?sort=followers:desc'),
+    staleTime: 60_000,
+  });
+  const recent = (creators?.items ?? []).slice(0, 6);
+
+  const items: NavItem[] = [
+    { to: '/', label: '首页', icon: 'home', end: true },
+    { to: '/library', label: '博主库', icon: 'users', count: creators?.total },
+    { to: '/articles', label: '文章', icon: 'doc' },
+    { to: '/settings', label: '设置', icon: 'cog' },
+  ];
+
+  const status = useSseStatus();
+  const statusLabel =
+    status === 'open' ? '本地服务 · 运行中' : status === 'connecting' ? '连接中' : '已断开';
+  const statusCls = status === 'open' ? s.ok : status === 'connecting' ? s.warn : s.bad;
+
+  return (
+    <aside className={s.sidebar}>
+      <div className={s.brand}>
+        <div className={s.brandMark}>V</div>
+        <div>
+          <div className={s.brandName}>VoxPress</div>
+        </div>
+        <div className={s.brandVersion}>v0.4</div>
+      </div>
+
+      <nav className={s.section} aria-label="主导航">
+        {items.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.end}
+            className={({ isActive }) =>
+              [s.item, isActive ? s.active : ''].filter(Boolean).join(' ')
+            }
+          >
+            <Icon name={item.icon} size={15} />
+            <span className={s.itemLabel}>{item.label}</span>
+            {item.count != null ? <span className={s.count}>{item.count}</span> : null}
+          </NavLink>
+        ))}
+      </nav>
+
+      <div className={s.section}>
+        <div className={s.sectionTitle}>最近博主</div>
+        <div className={s.recent}>
+          {recent.map((c) => (
+            <NavLink
+              key={c.id}
+              to={{ pathname: '/library', search: `?focus=${c.id}` }}
+              className={s.creator}
+            >
+              <Avatar size="sm" id={c.id} initial={c.initial} />
+              <span className={s.creatorName}>{c.name}</span>
+              <span className={s.creatorCount}>{c.article_count}</span>
+            </NavLink>
+          ))}
+          {recent.length === 0 ? (
+            <div style={{ padding: '8px 10px', color: 'var(--vp-ink-3)', fontSize: 12 }}>暂无</div>
+          ) : null}
+        </div>
+      </div>
+
+      <div className={s.status}>
+        <div className={s.statusRow} title={`SSE ${status} · ${loc.pathname}`}>
+          <span className={[s.statusDot, statusCls].join(' ')} />
+          <span>{statusLabel}</span>
+        </div>
+      </div>
+    </aside>
+  );
+}
