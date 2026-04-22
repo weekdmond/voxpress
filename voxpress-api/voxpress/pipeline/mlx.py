@@ -22,10 +22,20 @@ class MlxWhisperTranscriber(Transcriber):
     def __init__(self, model: str = "large-v3") -> None:
         self.model_repo = _MODEL_MAP.get(model, _MODEL_MAP["large-v3"])
 
-    async def transcribe(self, audio_path: Path, language: str = "zh") -> TranscriptResult:
-        return await asyncio.to_thread(self._transcribe_sync, audio_path, language)
+    async def transcribe(
+        self,
+        audio_path: Path,
+        language: str = "zh",
+        initial_prompt: str | None = None,
+    ) -> TranscriptResult:
+        return await asyncio.to_thread(self._transcribe_sync, audio_path, language, initial_prompt)
 
-    def _transcribe_sync(self, audio_path: Path, language: str) -> TranscriptResult:
+    def _transcribe_sync(
+        self,
+        audio_path: Path,
+        language: str,
+        initial_prompt: str | None,
+    ) -> TranscriptResult:
         import mlx_whisper
 
         lang_arg = None if language == "auto" else language
@@ -33,6 +43,7 @@ class MlxWhisperTranscriber(Transcriber):
             str(audio_path),
             path_or_hf_repo=self.model_repo,
             language=lang_arg,
+            initial_prompt=initial_prompt or None,
             word_timestamps=False,
         )
         segments = [
@@ -45,4 +56,5 @@ class MlxWhisperTranscriber(Transcriber):
             whole = str(result.get("text", "")).strip()
             if whole:
                 segments = [(0, whole)]
-        return TranscriptResult(segments=segments)
+        raw_text = str(result.get("text", "")).strip()
+        return TranscriptResult(segments=segments, raw_text=raw_text)

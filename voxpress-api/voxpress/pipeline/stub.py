@@ -43,7 +43,12 @@ class StubExtractor(Extractor):
 
 
 class StubTranscriber(Transcriber):
-    async def transcribe(self, audio_path: Path, language: str = "zh") -> TranscriptResult:
+    async def transcribe(
+        self,
+        audio_path: Path,
+        language: str = "zh",
+        initial_prompt: str | None = None,
+    ) -> TranscriptResult:
         await asyncio.sleep(1.2)
         segments = [
             (0, "这是占位逐字稿第一段。"),
@@ -64,25 +69,37 @@ class StubLLM(LLMBackend):
         prompt_template: str,
     ) -> dict:
         await asyncio.sleep(1.0)
-        summary = "这是由 stub LLM 生成的摘要。接入 Ollama / Claude 后替换。"
+        summary = "这是由 stub LLM 生成的摘要。接入 DashScope 后替换。"
         paragraphs = [
             "这是第一段正文,由占位后端生成。",
             "第二段继续占位。真实后端会严格按照 Prompt 模板把逐字稿整理成结构化文章。",
             f"来源提示:{creator_hint}。",
         ]
         content_md = f"# {title_hint}\n\n> {summary}\n\n" + "\n\n".join(paragraphs)
-        content_html = (
-            f"<h1>{title_hint}</h1>"
-            f"<p class=\"sum\">{summary}</p>"
-            + "".join(f"<p>{p}</p>" for p in paragraphs)
-        )
         tags = random.sample(["AI", "职场", "产品", "创业", "科技观察"], k=2)
-        word_count = sum(len(p) for p in paragraphs) + len(summary)
         return {
             "title": title_hint,
             "summary": summary,
             "content_md": content_md,
-            "content_html": content_html,
-            "word_count": word_count,
             "tags": tags,
+        }
+
+    async def annotate_background(
+        self,
+        *,
+        transcript: str,
+        title_hint: str,
+        creator_hint: str,
+        article_title: str,
+        article_summary: str,
+    ) -> dict | None:
+        await asyncio.sleep(0.2)
+        return {
+            "aliases": [
+                {
+                    "term": "占位术语",
+                    "refers_to": "示例背景注",
+                    "confidence": "high",
+                }
+            ]
         }

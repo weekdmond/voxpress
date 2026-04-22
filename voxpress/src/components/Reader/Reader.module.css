@@ -99,10 +99,24 @@
 }
 .drawerHead {
   padding: 14px 20px;
+  display: grid;
+  gap: 10px;
+  border-bottom: 1px solid var(--vp-line-2);
+}
+.drawerHeadTop {
   display: flex;
   align-items: center;
   gap: 8px;
-  border-bottom: 1px solid var(--vp-line-2);
+  flex-wrap: wrap;
+}
+.drawerModeBar {
+  display: flex;
+  gap: 8px;
+}
+.drawerMetaStack {
+  display: flex;
+  gap: 6px 12px;
+  flex-wrap: wrap;
 }
 .drawerMeta {
   font-family: var(--vp-font-mono);
@@ -131,32 +145,231 @@
   padding-top: 2px;
 }
 .seg:hover { background: var(--vp-panel); }
+.correctedBlock {
+  display: grid;
+  gap: 12px;
+  color: var(--vp-ink-2);
+  font-size: 13px;
+  line-height: 1.75;
+}
+.correctedBlock p {
+  margin: 0;
+}
+.changeList {
+  border-top: 1px solid var(--vp-line-2);
+  padding-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+.changeListTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vp-ink);
+}
+.changeItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--vp-ink-2);
+}
+.changeItem strong {
+  color: var(--vp-ink);
+}
+.changeItem em {
+  font-style: normal;
+  color: var(--vp-ink-3);
+}
+.drawerEmpty {
+  color: var(--vp-ink-3);
+  font-size: 12px;
+  font-family: var(--vp-font-mono);
+}
 
 .sourceCard {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  background: var(--vp-bg-2);
-  border-radius: var(--vp-radius-md);
-  border: 1px solid var(--vp-line);
-  padding: 14px 18px;
-  gap: 10px 24px;
-  margin: 6px 0 28px;
-}
-.sourceItem {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 2px 0 22px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid rgba(127, 141, 167, 0.12);
 }
-.sourceKey {
+
+.sourceInlineItem,
+.sourceInlineLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
   font-family: var(--vp-font-mono);
-  font-size: 10.5px;
-  color: var(--vp-ink-3);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-size: 12px;
+  color: var(--vp-ink-2);
 }
-.sourceVal {
-  font-family: var(--vp-font-mono);
-  font-size: 12.5px;
+
+.sourceInlineAccent {
   color: var(--vp-ink);
-  word-break: break-all;
+}
+
+.sourceInlineIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--vp-accent-2);
+}
+
+.sourceInlineValue {
+  font-weight: 500;
+  color: inherit;
+}
+
+.sourceDivider {
+  color: var(--vp-ink-4);
+  font-family: var(--vp-font-mono);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.sourceInlineLink {
+  color: var(--vp-accent-2);
+  text-decoration: none;
+}
+
+.sourceInlineLink:hover {
+  color: var(--vp-accent);
+}
+
+.sourceInlineLink:visited {
+  color: var(--vp-accent-2);
+}
+
+.backgroundNotes {
+  display: grid;
+  gap: 12px;
+  margin: 24px 0 8px;
+  padding: 14px 16px;
+  border: 1px solid rgba(127, 141, 167, 0.14);
+  border-radius: var(--vp-radius);
+  background: linear-gradient(180deg, rgba(241, 246, 255, 0.72), rgba(255, 255, 255, 0.9));
+}
+
+.backgroundNotesHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.backgroundNotesTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--vp-ink);
+}
+
+.backgroundNotesHint {
+  font-size: 11px;
+  font-family: var(--vp-font-mono);
+  color: var(--vp-ink-3);
+}
+
+.backgroundAliasList {
+  display: grid;
+  gap: 8px;
+}
+
+.backgroundAliasItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: calc(var(--vp-radius) - 2px);
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(127, 141, 167, 0.1);
+}
+
+.backgroundAliasRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.backgroundAliasTerm {
+  font-size: 13px;
+  color: var(--vp-ink);
+}
+
+.backgroundAliasArrow {
+  color: var(--vp-ink-4);
+}
+
+.backgroundAliasTarget {
+  color: var(--vp-ink-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.backgroundContext {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--vp-ink-2);
+}
+
+.backgroundContext strong {
+  color: var(--vp-ink);
+}
+
+.backgroundPending {
+  display: grid;
+  gap: 10px;
+}
+
+.backgroundPendingSummary {
+  cursor: pointer;
+  font-size: 12px;
+  font-family: var(--vp-font-mono);
+  color: var(--vp-ink-3);
+}
+
+.backgroundPendingSummary:hover {
+  color: var(--vp-ink-2);
+}
+
+@media (max-width: 780px) {
+  .article {
+    padding: 28px 20px 40px;
+  }
+
+  .drawerModeBar {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 520px) {
+  .sourceCard {
+    gap: 6px 10px;
+  }
+
+  .sourceInlineItem,
+  .sourceInlineLink {
+    font-size: 11.5px;
+  }
+
+  .backgroundAliasItem {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .sourceInlineValue {
+    font-size: 11.5px;
+  }
 }

@@ -42,4 +42,5 @@ export function ReaderArticle({
 }
 
 export { SourceCard } from './SourceCard';
+export { BackgroundNotes } from './BackgroundNotes';
 export { Drawer } from './Drawer';

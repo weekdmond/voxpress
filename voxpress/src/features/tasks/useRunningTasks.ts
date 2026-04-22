@@ -7,16 +7,16 @@ import { subscribeTasks } from '@/lib/sse';
 export function useRunningTasks() {
   const qc = useQueryClient();
   const query = useQuery({
-    queryKey: ['tasks', 'running'],
+    queryKey: ['tasks', 'active'],
     queryFn: async () => {
-      const res = await api.get<Page<Task>>('/api/tasks?status=running');
+      const res = await api.get<Page<Task>>('/api/tasks?status=active&limit=50');
       return res.items;
     },
     staleTime: 30_000,
   });
   useEffect(() => {
     return subscribeTasks((e) => {
-      qc.setQueryData<Task[]>(['tasks', 'running'], (old = []) => {
+      qc.setQueryData<Task[]>(['tasks', 'active'], (old = []) => {
         if (e.type === 'remove') return old.filter((t) => t.id !== e.task.id);
         if (e.type === 'create') {
           if (old.some((t) => t.id === e.task.id)) return old;
@@ -24,7 +24,7 @@ export function useRunningTasks() {
         }
         // update
         const t = e.task;
-        if (t.status === 'done' || t.status === 'canceled') {
+        if (t.status === 'done' || t.status === 'canceled' || t.status === 'failed') {
           return old.filter((x) => x.id !== t.id);
         }
         const exists = old.some((x) => x.id === t.id);

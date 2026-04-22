@@ -58,6 +58,16 @@ async def scrape_creator_page(
     return await asyncio.to_thread(_scrape_creator_sync, url, cookie_text, max_videos)
 
 
+async def probe_video_access(
+    url: str,
+    *,
+    cookie_text: str | None,
+) -> dict[str, Any]:
+    """Validate that yt-dlp can read a single video's metadata with the given
+    cookie, without downloading the actual media file."""
+    return await asyncio.to_thread(_probe_video_access_sync, url, cookie_text)
+
+
 def _scrape_creator_sync(url: str, cookie_text: str | None, max_videos: int) -> dict[str, Any]:
     import yt_dlp
 
@@ -144,6 +154,44 @@ def _scrape_creator_sync(url: str, cookie_text: str | None, max_videos: int) -> 
     return {"creator": creator, "videos": videos}
 
 
+def _probe_video_access_sync(url: str, cookie_text: str | None) -> dict[str, Any]:
+    import yt_dlp
+
+    ydl_opts: dict[str, Any] = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "skip_download": True,
+    }
+    cookie_path: Path | None = None
+    if cookie_text:
+        cookie_path = _write_cookie_file(cookie_text)
+        ydl_opts["cookiefile"] = str(cookie_path)
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                info = ydl.extract_info(url, download=False)
+            except Exception as e:
+                raise _translate_video_extract_error(e, action="读取视频元数据") from e
+    finally:
+        if cookie_path and cookie_path.exists():
+            try:
+                cookie_path.unlink()
+            except OSError:
+                pass
+
+    if info is None:
+        raise RuntimeError("yt-dlp 返回空")
+
+    video_id = str(info.get("id") or info.get("display_id") or "")
+    return {
+        "video_id": video_id,
+        "title": info.get("title") or video_id,
+        "source_url": info.get("webpage_url") or url,
+    }
+
+
 class YtDlpExtractor(Extractor):
     def __init__(self, cookie_text: str | None = None) -> None:
         self.cookie_text = cookie_text
@@ -155,14 +203,16 @@ class YtDlpExtractor(Extractor):
         import yt_dlp
 
         settings.audio_dir.mkdir(parents=True, exist_ok=True)
-        out_template = str(settings.audio_dir / "%(id)s.%(ext)s")
+        settings.video_dir.mkdir(parents=True, exist_ok=True)
+        out_template = str(settings.video_dir / "%(id)s.%(ext)s")
 
         ydl_opts: dict[str, Any] = {
-            "format": "bestaudio[ext=m4a]/bestaudio/best",
+            "format": "best[ext=mp4]/best",
             "outtmpl": out_template,
             "quiet": True,
             "no_warnings": True,
             "noplaylist": True,
+            "keepvideo": True,
             "postprocessors": [
                 {"key": "FFmpegExtractAudio", "preferredcodec": "m4a", "preferredquality": "0"},
             ],
@@ -177,25 +227,7 @@ class YtDlpExtractor(Extractor):
                 try:
                     info = ydl.extract_info(url, download=True)
                 except Exception as e:
-                    # yt-dlp wraps UnsupportedError inside DownloadError when
-                    # raised from the top-level extract_info, so we match on
-                    # the string rather than the exception class.
-                    msg = str(e)
-                    low = msg.lower()
-                    if "/share/user/" in msg or "/user/" in msg and "unsupported url" in low:
-                        raise RuntimeError(
-                            "这是博主主页链接,不是视频。请改用「博主库 → 导入博主」,"
-                            "或把短链换成某一条具体视频的链接(douyin.com/video/...)。"
-                        ) from e
-                    if "unsupported url" in low:
-                        raise RuntimeError(
-                            f"yt-dlp 不支持这个链接类型。原始错误:{msg[:200]}"
-                        ) from e
-                    if "fresh cookies" in low or "login required" in low:
-                        raise RuntimeError(
-                            "Cookie 无效或已过期,请在 /settings 重新粘贴一份新的。"
-                        ) from e
-                    raise RuntimeError(f"下载失败:{msg[:200]}") from e
+                    raise _translate_video_extract_error(e, action="下载") from e
         finally:
             if cookie_path and cookie_path.exists():
                 try:
@@ -207,7 +239,13 @@ class YtDlpExtractor(Extractor):
             raise RuntimeError("yt-dlp returned no info")
 
         video_id = str(info.get("id") or info.get("display_id") or "")
+        raw_audio_path = settings.video_dir / f"{video_id}.m4a"
         audio_path = settings.audio_dir / f"{video_id}.m4a"
+        if raw_audio_path.exists():
+            if audio_path.exists():
+                audio_path.unlink()
+            raw_audio_path.replace(audio_path)
+        video_path = _find_downloaded_video_path(video_id)
 
         # Creator fields — yt-dlp "uploader" is the display name
         uploader = info.get("uploader") or info.get("creator") or info.get("channel") or ""
@@ -237,6 +275,7 @@ class YtDlpExtractor(Extractor):
             cover_url=info.get("thumbnail"),
             source_url=info.get("webpage_url") or url,
             audio_path=audio_path,
+            video_path=video_path,
         )
 
 
@@ -264,3 +303,34 @@ def _coerce_published_at(info: dict[str, Any]) -> str:
         except ValueError:
             pass
     return datetime.now(tz=timezone.utc).isoformat()
+
+
+def _find_downloaded_video_path(video_id: str) -> Path | None:
+    preferred_suffixes = (".mp4", ".mov", ".mkv", ".webm", ".m4v", ".flv")
+    for suffix in preferred_suffixes:
+        candidate = settings.video_dir / f"{video_id}{suffix}"
+        if candidate.exists():
+            return candidate
+    for candidate in settings.video_dir.glob(f"{video_id}.*"):
+        if candidate.suffix.lower() in {".m4a", ".part", ".ytdl"}:
+            continue
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _translate_video_extract_error(exc: Exception, *, action: str) -> RuntimeError:
+    # yt-dlp wraps UnsupportedError inside DownloadError when raised from the
+    # top-level extract_info, so we match on the string rather than the class.
+    msg = str(exc)
+    low = msg.lower()
+    if "/share/user/" in msg or "/user/" in msg and "unsupported url" in low:
+        return RuntimeError(
+            "这是博主主页链接,不是视频。请改用「博主库 → 导入博主」,"
+            "或把短链换成某一条具体视频的链接(douyin.com/video/...)。"
+        )
+    if "unsupported url" in low:
+        return RuntimeError(f"yt-dlp 不支持这个链接类型。原始错误:{msg[:200]}")
+    if "fresh cookies" in low or "login required" in low:
+        return RuntimeError("Cookie 无效或已过期,请在 /settings 重新上传 cookies.txt。")
+    return RuntimeError(f"{action}失败:{msg[:200]}")

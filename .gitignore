@@ -36,6 +36,9 @@ VoxPress.zip
 /tmp/
 smoke_pipeline.py
 /voxpress-api/smoke_pipeline.py
+/voxpress-api/voxpress.db
+*.sqlite
+*.sqlite-journal
 
 # Alembic lockfiles (generated migrations are kept)
 # (nothing here; versions/ are tracked)

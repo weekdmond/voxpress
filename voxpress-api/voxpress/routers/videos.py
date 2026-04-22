@@ -3,18 +3,20 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from voxpress.db import get_session
-from voxpress.errors import CreatorNotFound
+from voxpress.errors import CreatorNotFound, NotFound
+from voxpress.media_store import MediaStoreError, media_store
 from voxpress.models import Article, Creator, Video
 from voxpress.schemas import Page, VideoOut
 
-router = APIRouter(prefix="/api/creators", tags=["videos"])
+router = APIRouter(prefix="/api", tags=["videos"])
 
 
-@router.get("/{creator_id}/videos", response_model=Page[VideoOut])
+@router.get("/creators/{creator_id}/videos", response_model=Page[VideoOut])
 async def list_videos(
     creator_id: int,
     s: AsyncSession = Depends(get_session),
@@ -51,8 +53,20 @@ async def list_videos(
 
     items = []
     for v in videos:
-        out = VideoOut.model_validate(v)
-        out.article_id = article_by_video.get(v.id)
-        items.append(out)
+        items.append(VideoOut.from_model(v, article_id=article_by_video.get(v.id)))
     total = await s.scalar(select(func.count()).where(Video.creator_id == creator_id))
     return Page(items=items, cursor=None, total=total or 0)
+
+
+@router.get("/videos/{video_id}/media")
+async def get_video_media(video_id: str, s: AsyncSession = Depends(get_session)) -> RedirectResponse:
+    video = await s.get(Video, video_id)
+    if not video or not video.media_object_key:
+        raise NotFound("视频尚未归档到媒体存储")
+    if not media_store.enabled:
+        raise NotFound("媒体存储尚未配置")
+    try:
+        signed = await media_store.sign_url(video.media_object_key)
+    except MediaStoreError as e:
+        raise NotFound(str(e)) from e
+    return RedirectResponse(signed, status_code=307)

@@ -4,11 +4,12 @@ import s from './StageStrip.module.css';
 const LABELS: Record<TaskStage, string> = {
   download: '下载',
   transcribe: '转写',
+  correct: '纠错',
   organize: '整理',
   save: '保存',
 };
 
-const STAGES: TaskStage[] = ['download', 'transcribe', 'organize', 'save'];
+const STAGES: TaskStage[] = ['download', 'transcribe', 'correct', 'organize', 'save'];
 
 export interface StageStripProps {
   current: TaskStage;

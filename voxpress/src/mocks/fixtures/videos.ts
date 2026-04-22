@@ -16,8 +16,10 @@ function mkVideos(creatorId: number, count: number): Video[] {
       shares: 60 + ((i * 41) % 900),
       collects: 200 + ((i * 97) % 2400),
       published_at: new Date(base - i * 86_400_000 * (0.8 + (i % 3) * 0.4)).toISOString(),
+      updated_at: new Date(base - i * 3_600_000).toISOString(),
       cover_url: null,
       source_url: `https://www.douyin.com/video/${id}`,
+      media_url: null,
       article_id: i < 2 ? `pseudo_${id}` : null,
     });
   }

@@ -1,30 +1,23 @@
-"""Pipeline runner.
-
-* One global limiter controls whole-pipeline concurrency (downloads +
-  transcription + LLM are all gated by it so we can't DOS ourselves
-  with 50 URLs at once).
-* Task state transitions publish SSE events via the broker.
-* Startup reconciliation marks orphan `running`/`queued` tasks as `failed`
-  (they died with the previous process).
-"""
-
 from __future__ import annotations
 
-import asyncio
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from voxpress.config import settings as app_settings
 from voxpress.db import session_scope
-from voxpress.models import Article, Creator, SettingEntry, Task, TranscriptSegment, Video
-from voxpress.pipeline.protocols import Extractor, LLMBackend, Transcriber
+from voxpress.markdown import md_to_html, strip_background_notes_md, word_count_cn
+from voxpress.media_store import MediaStoreError, audio_object_key, media_store, video_object_key
+from voxpress.models import Article, Creator, SettingEntry, Task, Transcript, TranscriptSegment, Video
+from voxpress.pipeline.dashscope import DashScopeCorrector
+from voxpress.pipeline.protocols import Extractor, ExtractorResult, LLMBackend, Transcriber, TranscriptResult
 from voxpress.pipeline.stub import StubExtractor, StubLLM, StubTranscriber
-from voxpress.sse import TaskEvent, broker
 
 logger = logging.getLogger(__name__)
 
@@ -37,219 +30,525 @@ def _parse_iso(s: str) -> datetime:
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
 
 
-def _task_to_payload(t: Task, creator: Creator | None = None) -> dict[str, Any]:
-    return {
-        "id": str(t.id),
-        "source_url": t.source_url,
-        "title_guess": t.title_guess,
-        "creator_id": t.creator_id,
-        "creator_name": creator.name if creator else None,
-        "creator_initial": (creator.name[0] if creator and creator.name else None),
-        "stage": t.stage,
-        "status": t.status,
-        "progress": t.progress,
-        "eta_sec": t.eta_sec,
-        "detail": t.detail,
-        "article_id": str(t.article_id) if t.article_id else None,
-        "error": t.error,
-        "started_at": t.started_at.isoformat() if t.started_at else None,
-        "updated_at": t.updated_at.isoformat() if t.updated_at else None,
-        "finished_at": t.finished_at.isoformat() if t.finished_at else None,
-    }
+def _normalize_runtime_settings(key: str, value: dict | None) -> dict:
+    raw = dict(value or {})
+    if key == "llm":
+        model = str(raw.get("model") or "").strip()
+        raw["backend"] = "dashscope"
+        if not model or ":" in model:
+            raw["model"] = "qwen-plus"
+        return raw
+    if key == "whisper":
+        model = str(raw.get("model") or "").strip()
+        if model != "qwen3-asr-flash-filetrans":
+            raw["model"] = "qwen3-asr-flash-filetrans"
+        language = str(raw.get("language") or "zh")
+        raw["language"] = language if language in {"zh", "auto"} else "zh"
+        raw["enable_initial_prompt"] = bool(raw.get("enable_initial_prompt", True))
+        return raw
+    if key == "corrector":
+        model = str(raw.get("model") or "").strip()
+        if not model or ":" in model:
+            raw["model"] = "qwen-turbo"
+        return raw
+    return raw
+
+
+@dataclass(slots=True)
+class VideoContext:
+    task: Task
+    video: Video
+    creator: Creator
+
+
+@dataclass(slots=True)
+class TranscriptContext:
+    video_id: str
+    raw_text: str
+    corrected_text: str | None
+    segments: list[tuple[int, str]]
+    corrections: list[dict[str, str]]
+    correction_status: str
+    initial_prompt_used: str | None
 
 
 class TaskRunner:
-    def __init__(self) -> None:
-        self._default_concurrency = app_settings.max_pipeline_concurrency
-        self._concurrency_limit = app_settings.max_pipeline_concurrency
-        self._running = 0
-        self._gate = asyncio.Condition()
-        self._inflight: dict[UUID, asyncio.Task] = {}
-
-    async def _backends(self) -> tuple[Extractor, Transcriber, LLMBackend]:
-        """Pick backends at task-start so settings changes apply without restart."""
+    async def _extractor_backend(self) -> Extractor:
         if app_settings.pipeline == "stub":
-            return StubExtractor(), StubTranscriber(), StubLLM()
-
-        # Real pipeline — lazy-import so stub mode never loads mlx/yt-dlp.
-        from voxpress.pipeline.mlx import MlxWhisperTranscriber
-        from voxpress.pipeline.ollama import OllamaLLM
-        from voxpress.pipeline.ytdlp import YtDlpExtractor
+            return StubExtractor()
+        from voxpress.pipeline.douyin_video import DouyinWebExtractor
 
         cookie_row = await self._load_settings_entry("cookie")
-        llm_row = await self._load_settings_entry("llm")
-        whisper_row = await self._load_settings_entry("whisper")
-
         cookie_text = (cookie_row or {}).get("text") if cookie_row else None
-        llm_model = (llm_row or {}).get("model", "qwen2.5:72b")
-        whisper_model = (whisper_row or {}).get("model", "large-v3")
+        return DouyinWebExtractor(cookie_text=cookie_text)
 
-        return (
-            YtDlpExtractor(cookie_text=cookie_text),
-            MlxWhisperTranscriber(model=whisper_model),
-            OllamaLLM(model=llm_model),
-        )
+    async def _transcriber_backend(self) -> Transcriber:
+        if app_settings.pipeline == "stub":
+            return StubTranscriber()
+        from voxpress.pipeline.dashscope import DashScopeFileTranscriber
 
-    # ───── lifecycle ─────
-
-    async def reconcile(self) -> int:
-        """Called on startup. Mark orphan running/queued tasks as failed."""
-        async with session_scope() as s:
-            res = await s.execute(
-                update(Task)
-                .where(Task.status.in_(["running", "queued"]))
-                .values(status="failed", error="进程重启,任务中断", finished_at=_now())
-                .returning(Task.id)
-            )
-            orphaned = [row[0] for row in res.all()]
-            return len(orphaned)
-
-    async def enqueue(self, task: Task, creator: Creator | None) -> None:
-        """Dispatch a task for background execution. Returns immediately."""
-        await broker.publish(TaskEvent("create", _task_to_payload(task, creator)))
-        t = asyncio.create_task(self._run(task.id))
-        self._inflight[task.id] = t
-        t.add_done_callback(lambda _t, tid=task.id: self._inflight.pop(tid, None))
-
-    async def cancel(self, task_id: UUID) -> bool:
-        t = self._inflight.get(task_id)
-        if not t:
-            return False
-        t.cancel()
-        return True
-
-    async def set_concurrency(self, value: Any) -> int:
-        limit = self._normalize_concurrency(value)
-        async with self._gate:
-            self._concurrency_limit = limit
-            self._gate.notify_all()
-        return limit
-
-    # ───── private ─────
-
-    async def _run(self, task_id: UUID) -> None:
-        acquired = False
-        try:
-            await self._acquire_slot()
-            acquired = True
-            await self._run_pipeline(task_id)
-        except asyncio.CancelledError:
-            await self._set(task_id, status="canceled", detail="已取消")
-            raise
-        except Exception as e:
-            logger.exception("task %s failed", task_id)
-            await self._set(task_id, status="failed", error=str(e))
-        finally:
-            if acquired:
-                await self._release_slot()
-
-    async def _run_pipeline(self, task_id: UUID) -> None:
-        extractor, transcriber, llm = await self._backends()
         whisper_row = await self._load_settings_entry("whisper")
-        llm_row = await self._load_settings_entry("llm")
-        whisper_model = (whisper_row or {}).get("model", "large-v3")
-        whisper_language = (whisper_row or {}).get("language", "zh")
-        llm_model = (llm_row or {}).get("model", "qwen2.5:72b")
+        whisper_model = (whisper_row or {}).get("model", "qwen3-asr-flash-filetrans")
+        return DashScopeFileTranscriber(model=whisper_model)
 
-        # Stage 1: download / extract
-        await self._set(task_id, status="running", stage="download", progress=5, detail="yt-dlp 读取元数据")
+    async def _llm_backend(self) -> LLMBackend:
+        if app_settings.pipeline == "stub":
+            return StubLLM()
+        from voxpress.pipeline.dashscope import DashScopeLLM
+
+        llm_row = await self._load_settings_entry("llm")
+        llm_model = (llm_row or {}).get("model", "qwen-plus")
+        return DashScopeLLM(model=llm_model)
+
+    async def _corrector_backend(self) -> DashScopeCorrector:
+        llm_row = await self._load_settings_entry("llm")
+        corrector_row = await self._load_settings_entry("corrector")
+        model = str((corrector_row or {}).get("model") or (llm_row or {}).get("model", "qwen-turbo"))
+        template = str((corrector_row or {}).get("template") or "")
+        return DashScopeCorrector(model=model, template=template)
+
+    async def current_whisper_label(self) -> str:
+        whisper_row = await self._load_settings_entry("whisper")
+        return f"DashScope {(whisper_row or {}).get('model', 'qwen3-asr-flash-filetrans')}"
+
+    async def current_whisper_model(self) -> str:
+        whisper_row = await self._load_settings_entry("whisper")
+        return str((whisper_row or {}).get("model", "qwen3-asr-flash-filetrans"))
+
+    async def current_whisper_language(self) -> str:
+        whisper_row = await self._load_settings_entry("whisper")
+        return str((whisper_row or {}).get("language", "zh"))
+
+    async def enable_initial_prompt(self) -> bool:
+        whisper_row = await self._load_settings_entry("whisper")
+        return bool((whisper_row or {}).get("enable_initial_prompt", True))
+
+    async def current_llm_label(self) -> str:
+        llm_row = await self._load_settings_entry("llm")
+        return f"DashScope {(llm_row or {}).get('model', 'qwen-plus')}"
+
+    async def current_llm_model(self) -> str:
+        llm_row = await self._load_settings_entry("llm")
+        return str((llm_row or {}).get("model", "qwen-plus"))
+
+    async def current_corrector_label(self) -> str:
+        corrector_row = await self._load_settings_entry("corrector")
+        llm_row = await self._load_settings_entry("llm")
+        model = (corrector_row or {}).get("model") or (llm_row or {}).get("model", "qwen-turbo")
+        return f"DashScope {model} · 纠错"
+
+    async def current_corrector_model(self) -> str:
+        corrector_row = await self._load_settings_entry("corrector")
+        llm_row = await self._load_settings_entry("llm")
+        return str((corrector_row or {}).get("model") or (llm_row or {}).get("model", "qwen-turbo"))
+
+    async def auto_correct_enabled(self) -> bool:
+        corrector_row = await self._load_settings_entry("corrector")
+        return bool((corrector_row or {}).get("enabled", True))
+
+    async def background_notes_enabled(self) -> bool:
+        article_row = await self._load_settings_entry("article")
+        return bool((article_row or {}).get("generate_background_notes", True))
+
+    async def download_stage(self, task_id: UUID) -> ExtractorResult:
+        extractor = await self._extractor_backend()
         async with session_scope() as s:
             task = await s.get(Task, task_id)
-            if not task:
-                return
+            if task is None:
+                raise RuntimeError(f"task {task_id} missing")
             url = task.source_url
-        meta = await extractor.extract(url)
-        await self._set(task_id, progress=30, detail="下载完成")
 
-        # Upsert creator & video
+        meta = await self._restore_cached_extract(task_id)
+        if meta is None:
+            meta = await extractor.extract(url)
+            await self._archive_media(meta)
+
         async with session_scope() as s:
+            task = await s.get(Task, task_id)
+            if task is None:
+                raise RuntimeError(f"task {task_id} missing at save")
+            meta = await self._pin_creator_context(s, task, meta)
             creator = await self._upsert_creator(s, meta)
             video = await self._upsert_video(s, meta, creator.id)
+            task.creator_id = creator.id
+            task.video_id = video.id
+            task.title_guess = meta.title
+            await s.flush()
+
+        return meta
+
+    async def prepare_audio(self, task_id: UUID) -> Path:
+        ctx = await self._load_video_context(task_id)
+        local_audio = self._find_local_audio(ctx.video.id)
+        if local_audio is not None:
+            return local_audio
+
+        app_settings.audio_dir.mkdir(parents=True, exist_ok=True)
+        audio_path = app_settings.audio_dir / f"{ctx.video.id}.m4a"
+        if ctx.video.audio_object_key and media_store.enabled:
+            await media_store.download_file(ctx.video.audio_object_key, path=audio_path)
+            return audio_path
+
+        if ctx.video.media_object_key and media_store.enabled:
+            app_settings.video_dir.mkdir(parents=True, exist_ok=True)
+            video_path = app_settings.video_dir / f"{ctx.video.id}.mp4"
+            await media_store.download_file(ctx.video.media_object_key, path=video_path)
+            from voxpress.pipeline.douyin_video import _extract_audio
+
+            await _extract_audio(video_path, audio_path)
+            return audio_path
+
+        extractor = await self._extractor_backend()
+        meta = await extractor.extract(ctx.task.source_url)
+        await self._archive_media(meta)
+        async with session_scope() as s:
             task = await s.get(Task, task_id)
-            if task:
+            if task is not None:
+                meta = await self._pin_creator_context(s, task, meta)
+                creator = await self._upsert_creator(s, meta)
+                video = await self._upsert_video(s, meta, creator.id)
                 task.creator_id = creator.id
                 task.video_id = video.id
                 task.title_guess = meta.title
+        return meta.audio_path
 
-        # Stage 2: transcribe
-        await self._set(task_id, stage="transcribe", progress=45, detail=f"mlx-whisper {whisper_model}")
-        transcript = await transcriber.transcribe(meta.audio_path, language=whisper_language)
-        await self._set(task_id, progress=65, detail=f"转写完成 · {len(transcript.segments)} 段")
+    async def transcribe_inline(self, task_id: UUID) -> TranscriptResult:
+        audio_path = await self.prepare_audio(task_id)
+        ctx = await self._load_video_context(task_id)
+        if media_store.enabled and not ctx.video.audio_object_key and audio_path.exists():
+            try:
+                object_key = await media_store.upload_file(
+                    audio_path,
+                    object_key=audio_object_key(ctx.video.id, audio_path),
+                )
+            except MediaStoreError as exc:
+                logger.warning("archive audio before transcribe failed for %s: %s", ctx.video.id, exc)
+            else:
+                if object_key:
+                    async with session_scope() as s:
+                        video = await s.get(Video, ctx.video.id)
+                        if video is not None:
+                            video.audio_object_key = object_key
+        transcriber = await self._transcriber_backend()
+        language = await self.current_whisper_language()
+        initial_prompt = await self.build_initial_prompt(task_id)
+        return await transcriber.transcribe(
+            audio_path,
+            language=language,
+            initial_prompt=initial_prompt,
+        )
 
-        # Stage 3: organize
-        await self._set(task_id, stage="organize", progress=75, detail=f"Ollama {llm_model}")
+    async def build_initial_prompt(self, task_id: UUID) -> str | None:
+        if not await self.enable_initial_prompt():
+            return None
+        ctx = await self._load_video_context(task_id)
+        parts = [ctx.video.title.strip(), ctx.creator.name.strip()]
+        prompt = "。".join(part for part in parts if part).strip()
+        return prompt[:200] or None
+
+    async def save_transcript_stage(
+        self,
+        task_id: UUID,
+        transcript: TranscriptResult,
+        *,
+        initial_prompt_used: str | None,
+        whisper_model: str,
+        whisper_language: str,
+    ) -> None:
+        ctx = await self._load_video_context(task_id)
+        payload = [[ts, text] for ts, text in transcript.segments]
+        async with session_scope() as s:
+            row = await s.get(Transcript, ctx.video.id)
+            if row is None:
+                row = Transcript(video_id=ctx.video.id, raw_text=transcript.raw_text, segments=payload)
+                s.add(row)
+            else:
+                row.raw_text = transcript.raw_text
+                row.segments = payload
+            row.initial_prompt_used = initial_prompt_used
+            row.whisper_model = whisper_model
+            row.whisper_language = whisper_language
+            row.corrected_text = None
+            row.corrections = None
+            row.correction_status = "pending"
+            row.corrector_model = None
+
+    async def mark_correct_skipped(self, task_id: UUID) -> None:
+        ctx = await self._load_video_context(task_id)
+        async with session_scope() as s:
+            row = await s.get(Transcript, ctx.video.id)
+            if row is None:
+                raise RuntimeError(f"transcript for video {ctx.video.id} missing")
+            row.corrected_text = row.raw_text
+            row.corrections = []
+            row.correction_status = "skipped"
+            row.corrector_model = None
+
+    async def correct_stage(self, task_id: UUID) -> dict[str, Any]:
+        ctx = await self._load_video_context(task_id)
+        transcript = await self._load_transcript(ctx.video.id)
+        if not transcript.raw_text:
+            raise RuntimeError("逐字稿为空，无法纠错")
+        corrector = await self._corrector_backend()
+        try:
+            corrected = await corrector.correct(
+                text=transcript.raw_text,
+                title_hint=ctx.video.title,
+                creator_hint=ctx.creator.name,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("correct stage failed for %s: %s", ctx.video.id, exc)
+            corrected = {
+                "corrected_text": transcript.raw_text,
+                "corrections": [],
+                "correction_status": "failed",
+                "corrector_model": corrector.model,
+            }
+        async with session_scope() as s:
+            row = await s.get(Transcript, ctx.video.id)
+            if row is None:
+                raise RuntimeError(f"transcript for video {ctx.video.id} missing")
+            row.corrected_text = str(corrected.get("corrected_text") or transcript.raw_text)
+            row.corrections = corrected.get("corrections") or []
+            row.correction_status = str(corrected.get("correction_status") or "ok")
+            row.corrector_model = str(corrected.get("corrector_model") or "")
+        return corrected
+
+    async def organize_stage(self, task_id: UUID) -> dict[str, Any]:
+        llm = await self._llm_backend()
         settings_row = await self._load_settings_entry("prompt")
         prompt_template = (settings_row or {}).get("template", "")
-        transcript_text = "\n".join(seg[1] for seg in transcript.segments)
+        ctx = await self._load_video_context(task_id)
+        transcript = await self._load_transcript(ctx.video.id)
+        transcript_text = (transcript.corrected_text or transcript.raw_text).strip()
+        if not transcript_text:
+            raise RuntimeError("逐字稿为空，无法进入整理阶段")
         organized = await llm.organize(
             transcript=transcript_text,
-            title_hint=meta.title,
-            creator_hint=meta.creator_name,
+            title_hint=ctx.video.title,
+            creator_hint=ctx.creator.name,
             prompt_template=prompt_template,
         )
+        usage = organized.get("_usage")
+        if await self.background_notes_enabled():
+            try:
+                background_notes = await llm.annotate_background(
+                    transcript=transcript_text,
+                    title_hint=ctx.video.title,
+                    creator_hint=ctx.creator.name,
+                    article_title=str(organized.get("title") or ctx.video.title),
+                    article_summary=str(organized.get("summary") or ""),
+                )
+                if isinstance(background_notes, dict) and background_notes.get("_usage") and usage:
+                    from voxpress.task_metrics import merge_usage
 
-        # Stage 4: save
-        await self._set(task_id, stage="save", progress=92, detail="写入数据库")
-        article_id = await self._save_article(
-            meta=meta,
-            transcript=transcript,
-            organized=organized,
-        )
-        await self._set(
-            task_id,
-            status="done",
-            stage="save",
-            progress=100,
-            detail="完成",
-            article_id=article_id,
-            finished_at=_now(),
-        )
+                    usage = merge_usage(usage, background_notes.get("_usage"))
+                elif isinstance(background_notes, dict) and background_notes.get("_usage"):
+                    usage = background_notes.get("_usage")
+                if isinstance(background_notes, dict):
+                    background_notes.pop("_usage", None)
+                    background_notes.pop("_primary_model", None)
+                organized["background_notes"] = background_notes
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("background notes generation failed for %s: %s", ctx.video.id, exc)
+                organized["background_notes"] = None
+        else:
+            organized["background_notes"] = None
+        if isinstance(organized, dict):
+            organized["_usage"] = usage
+        return organized
 
-    async def _set(self, task_id: UUID, **fields: Any) -> None:
+    async def save_stage(
+        self,
+        task_id: UUID,
+        *,
+        organized: dict[str, Any],
+    ) -> UUID:
+        ctx = await self._load_video_context(task_id)
+        meta = self._meta_from_video_context(ctx)
+        transcript = await self._load_transcript(ctx.video.id)
+        return await self._save_article(meta=meta, transcript=transcript, organized=organized)
+
+    async def _archive_media(self, meta: ExtractorResult) -> None:
+        if not media_store.enabled:
+            return
+        if meta.video_path:
+            try:
+                meta.media_object_key = await media_store.upload_file(
+                    meta.video_path,
+                    object_key=video_object_key(meta.video_id, meta.video_path),
+                )
+                if meta.media_object_key and meta.video_path.exists():
+                    meta.video_path.unlink()
+            except MediaStoreError as e:
+                logger.warning("archive video failed for %s: %s", meta.video_id, e)
+            except OSError as e:
+                logger.warning("cleanup local video failed for %s: %s", meta.video_id, e)
+        if meta.audio_path and meta.audio_path.exists() and not meta.audio_object_key:
+            try:
+                meta.audio_object_key = await media_store.upload_file(
+                    meta.audio_path,
+                    object_key=audio_object_key(meta.video_id, meta.audio_path),
+                )
+            except MediaStoreError as e:
+                logger.warning("archive audio failed for %s: %s", meta.video_id, e)
+
+    async def _restore_cached_extract(self, task_id: UUID) -> ExtractorResult | None:
         async with session_scope() as s:
             task = await s.get(Task, task_id)
-            if not task:
-                return
-            for k, v in fields.items():
-                setattr(task, k, v)
-            task.updated_at = _now()
-            await s.flush()
-            creator = None
-            if task.creator_id:
-                creator = await s.get(Creator, task.creator_id)
-            payload = _task_to_payload(task, creator)
-        # Publish outside the session.
-        # `done` and `canceled` → task leaves the running list.
-        # `failed`             → stays visible so the user can see the error + retry.
-        await broker.publish(TaskEvent("update", payload))
-        if fields.get("status") in ("done", "canceled"):
-            await broker.publish(TaskEvent("remove", {"id": payload["id"]}))
+            if task is None:
+                return None
+            video = await self._find_existing_video(s, task)
+            if video is None:
+                return None
+            creator = await s.get(Creator, video.creator_id)
+            if creator is None:
+                return None
 
-    async def _acquire_slot(self) -> None:
-        await self._sync_concurrency_from_settings()
-        async with self._gate:
-            while self._running >= self._concurrency_limit:
-                await self._gate.wait()
-            self._running += 1
+        local_audio = self._find_local_audio(video.id)
+        if local_audio is not None:
+            return self._meta_from_cached_video(video=video, creator=creator, audio_path=local_audio)
 
-    async def _release_slot(self) -> None:
-        async with self._gate:
-            self._running = max(0, self._running - 1)
-            self._gate.notify_all()
+        if video.audio_object_key and media_store.enabled:
+            app_settings.audio_dir.mkdir(parents=True, exist_ok=True)
+            audio_suffix = (
+                video.audio_object_key.rsplit(".", 1)[-1] if "." in video.audio_object_key else "m4a"
+            )
+            audio_path = app_settings.audio_dir / f"{video.id}.{audio_suffix}"
+            try:
+                await media_store.download_file(video.audio_object_key, path=audio_path)
+            except MediaStoreError as e:
+                logger.warning("restore archived audio failed for %s: %s", video.id, e)
+                return None
+            return self._meta_from_cached_video(video=video, creator=creator, audio_path=audio_path)
 
-    async def _sync_concurrency_from_settings(self) -> int:
-        llm_row = await self._load_settings_entry("llm")
-        requested = (llm_row or {}).get("concurrency", self._default_concurrency)
-        return await self.set_concurrency(requested)
+        return None
 
-    def _normalize_concurrency(self, value: Any) -> int:
-        try:
-            limit = int(value)
-        except (TypeError, ValueError):
-            limit = self._default_concurrency
-        return max(1, min(limit, 20))
+    async def _find_existing_video(self, s: AsyncSession, task: Task) -> Video | None:
+        if task.video_id:
+            video = await s.get(Video, task.video_id)
+            if video is not None:
+                return video
+        return await s.scalar(
+            select(Video).where(Video.source_url == task.source_url).order_by(Video.updated_at.desc()).limit(1)
+        )
 
-    async def _upsert_creator(self, s: AsyncSession, meta) -> Creator:
+    def _find_local_audio(self, video_id: str) -> Path | None:
+        app_settings.audio_dir.mkdir(parents=True, exist_ok=True)
+        for candidate in sorted(app_settings.audio_dir.glob(f"{video_id}.*")):
+            if candidate.is_file():
+                return candidate
+        return None
+
+    def _meta_from_cached_video(
+        self,
+        *,
+        video: Video,
+        creator: Creator,
+        audio_path: Path,
+    ) -> ExtractorResult:
+        return ExtractorResult(
+            video_id=video.id,
+            creator_external_id=creator.external_id,
+            creator_handle=creator.handle,
+            creator_name=creator.name,
+            creator_region=creator.region,
+            creator_verified=creator.verified,
+            creator_followers=creator.followers,
+            creator_total_likes=creator.total_likes,
+            title=video.title,
+            duration_sec=video.duration_sec,
+            likes=video.likes,
+            plays=video.plays,
+            comments=video.comments,
+            shares=video.shares,
+            collects=video.collects,
+            published_at_iso=video.published_at.isoformat(),
+            cover_url=video.cover_url,
+            source_url=video.source_url,
+            audio_path=audio_path,
+            video_path=None,
+            media_object_key=video.media_object_key,
+            audio_object_key=video.audio_object_key,
+        )
+
+    def _meta_from_video_context(self, ctx: VideoContext) -> ExtractorResult:
+        audio_path = self._find_local_audio(ctx.video.id) or (
+            app_settings.audio_dir / f"{ctx.video.id}.m4a"
+        )
+        return self._meta_from_cached_video(video=ctx.video, creator=ctx.creator, audio_path=audio_path)
+
+    async def _load_video_context(self, task_id: UUID) -> VideoContext:
+        async with session_scope() as s:
+            task = await s.get(Task, task_id)
+            if task is None:
+                raise RuntimeError(f"task {task_id} missing")
+            if not task.video_id or not task.creator_id:
+                raise RuntimeError(f"task {task_id} missing resolved video/creator")
+            video = await s.get(Video, task.video_id)
+            creator = await s.get(Creator, task.creator_id)
+            if video is None:
+                raise RuntimeError(f"video {task.video_id} missing")
+            if creator is None:
+                raise RuntimeError(f"creator {task.creator_id} missing")
+            return VideoContext(task=task, video=video, creator=creator)
+
+    async def task_duration_sec(self, task_id: UUID) -> int:
+        ctx = await self._load_video_context(task_id)
+        return int(ctx.video.duration_sec or 0)
+
+    async def _load_transcript(self, video_id: str) -> TranscriptContext:
+        async with session_scope() as s:
+            row = await s.get(Transcript, video_id)
+        if row is None:
+            raise RuntimeError(f"transcript for video {video_id} missing")
+        segments: list[tuple[int, str]] = []
+        for item in list(row.segments or []):
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                segments.append((int(item[0]), str(item[1])))
+        return TranscriptContext(
+            video_id=row.video_id,
+            raw_text=row.raw_text,
+            corrected_text=row.corrected_text,
+            segments=segments,
+            corrections=[
+                {
+                    "from": str(change.get("from") or ""),
+                    "to": str(change.get("to") or ""),
+                    "reason": str(change.get("reason") or ""),
+                }
+                for change in list(row.corrections or [])
+                if isinstance(change, dict)
+            ],
+            correction_status=row.correction_status,
+            initial_prompt_used=row.initial_prompt_used,
+        )
+
+    async def _pin_creator_context(
+        self,
+        s: AsyncSession,
+        task: Task,
+        meta: ExtractorResult,
+    ) -> ExtractorResult:
+        if task.creator_id is None:
+            return meta
+        creator = await s.get(Creator, task.creator_id)
+        if creator is None:
+            return meta
+        existing_video = await self._find_existing_video(s, task)
+        if existing_video is None or existing_video.creator_id != creator.id:
+            return meta
+
+        meta.creator_external_id = creator.external_id
+        meta.creator_handle = creator.handle
+        meta.creator_name = creator.name
+        meta.creator_region = creator.region
+        meta.creator_verified = creator.verified
+        meta.creator_followers = creator.followers
+        meta.creator_total_likes = creator.total_likes
+        return meta
+
+    async def _upsert_creator(self, s: AsyncSession, meta: ExtractorResult) -> Creator:
         existing = await s.scalar(
             select(Creator).where(
                 Creator.platform == "douyin", Creator.external_id == meta.creator_external_id
@@ -260,8 +559,8 @@ class TaskRunner:
             existing.handle = meta.creator_handle
             existing.region = meta.creator_region
             existing.verified = meta.creator_verified
-            existing.followers = meta.creator_followers
-            existing.total_likes = meta.creator_total_likes
+            existing.followers = max(existing.followers or 0, meta.creator_followers or 0)
+            existing.total_likes = max(existing.total_likes or 0, meta.creator_total_likes or 0)
             existing.recent_update_at = _now()
             await s.flush()
             return existing
@@ -281,12 +580,12 @@ class TaskRunner:
         await s.flush()
         return c
 
-    async def _upsert_video(self, s: AsyncSession, meta, creator_id: int) -> Video:
+    async def _upsert_video(self, s: AsyncSession, meta: ExtractorResult, creator_id: int) -> Video:
+        now = _now()
         published_at = _parse_iso(meta.published_at_iso)
         existing = await s.get(Video, meta.video_id)
         if existing:
-            # Refresh mutable metrics so rebuild / creator-refresh reflect reality.
-            # id / creator_id / source_url are the immutable identity — don't touch.
+            existing.creator_id = creator_id
             existing.title = meta.title
             existing.duration_sec = meta.duration_sec
             existing.likes = meta.likes
@@ -296,6 +595,12 @@ class TaskRunner:
             existing.collects = meta.collects
             existing.cover_url = meta.cover_url
             existing.published_at = published_at
+            existing.source_url = meta.source_url
+            existing.updated_at = now
+            if meta.media_object_key:
+                existing.media_object_key = meta.media_object_key
+            if meta.audio_object_key:
+                existing.audio_object_key = meta.audio_object_key
             await s.flush()
             return existing
         v = Video(
@@ -310,13 +615,26 @@ class TaskRunner:
             collects=meta.collects,
             published_at=published_at,
             cover_url=meta.cover_url,
+            media_object_key=meta.media_object_key,
+            audio_object_key=meta.audio_object_key,
             source_url=meta.source_url,
+            updated_at=now,
         )
         s.add(v)
         await s.flush()
         return v
 
-    async def _save_article(self, *, meta, transcript, organized) -> UUID:
+    async def _save_article(
+        self,
+        *,
+        meta: ExtractorResult,
+        transcript: TranscriptContext,
+        organized: dict[str, Any],
+    ) -> UUID:
+        background_notes = organized.get("background_notes")
+        final_md = strip_background_notes_md(str(organized["content_md"]))
+        final_html = md_to_html(final_md)
+        final_word_count = word_count_cn(final_md)
         async with session_scope() as s:
             creator = await s.scalar(
                 select(Creator).where(
@@ -340,10 +658,11 @@ class TaskRunner:
             article.creator_id = creator.id
             article.title = organized["title"]
             article.summary = organized["summary"]
-            article.content_md = organized["content_md"]
-            article.content_html = organized["content_html"]
-            article.word_count = organized["word_count"]
+            article.content_md = final_md
+            article.content_html = final_html
+            article.word_count = final_word_count
             article.tags = organized["tags"]
+            article.background_notes = background_notes
             article.likes_snapshot = meta.likes
             article.published_at = _parse_iso(meta.published_at_iso)
             await s.flush()
@@ -355,7 +674,7 @@ class TaskRunner:
     async def _load_settings_entry(self, key: str) -> dict | None:
         async with session_scope() as s:
             row = await s.get(SettingEntry, key)
-            return row.value if row else None
+            return _normalize_runtime_settings(key, row.value if row else None)
 
 
 runner = TaskRunner()

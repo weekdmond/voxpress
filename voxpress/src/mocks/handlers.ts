@@ -3,6 +3,10 @@ import type {
   ArticleDetail,
   Page,
   Settings,
+  TaskCancelResult,
+  TaskDetail,
+  TaskRerunResult,
+  TaskSummary,
   Task,
   Video,
 } from '@/types/api';
@@ -93,16 +97,20 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
     const tag = params.get('tag');
     const since = params.get('since');
     let items: Article[] = [...articles];
-    if (q) items = items.filter((a) => a.title.toLowerCase().includes(q));
+    if (q) items = items.filter((a) => a.title.toLowerCase().includes(q) || a.summary.toLowerCase().includes(q) || a.content_md.toLowerCase().includes(q));
     if (creatorId) items = items.filter((a) => a.creator_id === Number(creatorId));
     if (tag) items = items.filter((a) => a.tags.includes(tag));
-    if (since === '30d') {
-      const cutoff = Date.now() - 30 * 86_400_000;
-      items = items.filter((a) => Date.parse(a.published_at) >= cutoff);
+    if (since && since.endsWith('d')) {
+      const days = Number(since.slice(0, -1));
+      if (days > 0) {
+        const cutoff = Date.now() - days * 86_400_000;
+        items = items.filter((a) => Date.parse(a.published_at) >= cutoff);
+      }
     }
     items.sort((a, b) => Date.parse(b.published_at) - Date.parse(a.published_at));
+    const total = items.length;
     const limit = Number(params.get('limit') ?? items.length);
-    return delay(page(items.slice(0, limit), null, articles.length));
+    return delay(page(items.slice(0, limit), null, total));
   }
 
   const articleMatch = match(path, /^\/api\/articles\/([\w-]+)$/);
@@ -111,6 +119,42 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
     const detail = articleDetails[id] as ArticleDetail | undefined;
     if (!detail) throw apiError('not_found', '文章不存在', 404);
     return delay(detail);
+  }
+
+  if (method === 'POST' && path === '/api/articles/batch/rebuild') {
+    const ids = ((body as { article_ids?: string[] } | undefined)?.article_ids ?? []).filter(Boolean);
+    const matched = ids.filter((id) => articleDetails[id]);
+    const task_ids = matched.map((id) => {
+      const detail = articleDetails[id];
+      return mockStore.createTask(detail?.source.source_url ?? `https://www.douyin.com/video/${id}`).id;
+    });
+    return delay({
+      requested: ids.length,
+      matched: matched.length,
+      processed: task_ids.length,
+      task_ids,
+      missing_ids: ids.filter((id) => !articleDetails[id]),
+    });
+  }
+
+  if (method === 'POST' && path === '/api/articles/batch/delete') {
+    const ids = new Set(((body as { article_ids?: string[] } | undefined)?.article_ids ?? []).filter(Boolean));
+    const matchedIds = articles.filter((article) => ids.has(article.id)).map((article) => article.id);
+
+    for (let i = articles.length - 1; i >= 0; i -= 1) {
+      if (ids.has(articles[i].id)) articles.splice(i, 1);
+    }
+    matchedIds.forEach((id) => {
+      delete articleDetails[id];
+    });
+
+    return delay({
+      requested: ids.size,
+      matched: matchedIds.length,
+      processed: matchedIds.length,
+      task_ids: [],
+      missing_ids: Array.from(ids).filter((id) => !matchedIds.includes(id)),
+    });
   }
 
   const rebuildMatch = match(path, /^\/api\/articles\/([\w-]+)\/rebuild$/);
@@ -125,9 +169,46 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
   // Tasks
   if (method === 'GET' && path === '/api/tasks') {
     const status = params.get('status');
+    const stage = params.get('stage');
+    const model = params.get('model');
+    const q = params.get('q')?.toLowerCase() ?? '';
+    const pageNum = Number(params.get('page') ?? 1);
+    const limit = Number(params.get('limit') ?? 20);
     let items: Task[] = mockStore.getAllTasks();
-    if (status) items = items.filter((t) => t.status === status);
-    return delay(page(items, null, items.length));
+    if (status === 'active') items = items.filter((t) => t.status === 'running' || t.status === 'queued');
+    else if (status) items = items.filter((t) => t.status === status);
+    if (stage) items = items.filter((t) => t.stage === stage);
+    if (model) items = items.filter((t) => t.primary_model === model);
+    if (q) items = items.filter((t) => `${t.id} ${t.title_guess} ${t.article_title ?? ''} ${t.creator_name ?? ''}`.toLowerCase().includes(q));
+    items.sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at));
+    const total = items.length;
+    const start = Math.max(0, (pageNum - 1) * limit);
+    return delay(page(items.slice(start, start + limit), null, total));
+  }
+
+  if (method === 'GET' && path === '/api/tasks/summary') {
+    const items: Task[] = mockStore.getAllTasks();
+    const summary: TaskSummary = {
+      today_tasks: items.length,
+      today_success_rate: 95.8,
+      today_cost_cny: 4.12,
+      today_total_tokens: 287000,
+      avg_elapsed_ms: 52000,
+      status_counts: {
+        running: items.filter((item) => item.status === 'running').length,
+        queued: items.filter((item) => item.status === 'queued').length,
+        done: items.filter((item) => item.status === 'done').length,
+        failed: items.filter((item) => item.status === 'failed').length,
+        canceled: items.filter((item) => item.status === 'canceled').length,
+      },
+      model_facets: [
+        { value: 'qwen-turbo', count: items.length },
+        { value: 'qwen-plus', count: items.length },
+        { value: 'qwen3-asr-flash-filetrans', count: items.length },
+      ],
+    };
+    summary.status_counts.active = summary.status_counts.running + summary.status_counts.queued;
+    return delay(summary);
   }
 
   if (method === 'POST' && path === '/api/tasks') {
@@ -151,6 +232,71 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
     return delay(t);
   }
 
+  const taskDetailMatch = match(path, /^\/api\/tasks\/([\w-]+)\/detail$/);
+  if (method === 'GET' && taskDetailMatch) {
+    const task = mockStore.getTask(taskDetailMatch[1]);
+    if (!task) throw apiError('task_not_found', '任务不存在', 404);
+    const detail: TaskDetail = {
+      ...task,
+      stage_runs: ['download', 'transcribe', 'correct', 'organize', 'save'].map((stage, index) => ({
+        stage: stage as TaskDetail['stage_runs'][number]['stage'],
+        status: index < ['download', 'transcribe', 'correct', 'organize', 'save'].indexOf(task.stage)
+          ? 'done'
+          : stage === task.stage
+          ? task.status
+          : 'queued',
+        provider: stage === 'download' ? 'douyin' : stage === 'save' ? 'database' : 'dashscope',
+        model:
+          stage === 'transcribe'
+            ? 'qwen3-asr-flash-filetrans'
+            : stage === 'correct'
+            ? 'qwen-turbo'
+            : stage === 'organize'
+            ? 'qwen-plus'
+            : null,
+        started_at: task.started_at,
+        finished_at: task.finished_at,
+        duration_ms: task.elapsed_ms,
+        input_tokens: stage === 'organize' ? 11000 : 0,
+        output_tokens: stage === 'organize' ? 1900 : 0,
+        total_tokens: stage === 'organize' ? 12900 : 0,
+        cost_cny: stage === 'organize' ? 0.0124 : 0,
+        detail: task.detail,
+        error: task.error,
+      })),
+      available_rerun_modes: { resume: true, organize: true, full: true },
+    };
+    return delay(detail);
+  }
+
+  if (method === 'POST' && path === '/api/tasks/rerun') {
+    const payload = body as { task_ids?: string[]; mode?: 'resume' | 'organize' | 'full' } | undefined;
+    const ids = payload?.task_ids ?? [];
+    const created = ids.map((id) => mockStore.createTask(`https://www.douyin.com/video/rerun-${id}`));
+    const res: TaskRerunResult = {
+      requested: ids.length,
+      processed: created.length,
+      task_ids: created.map((task) => task.id),
+      skipped_ids: [],
+    };
+    return delay(res);
+  }
+
+  if (method === 'POST' && path === '/api/tasks/cancel') {
+    const ids = ((body as { task_ids?: string[] } | undefined)?.task_ids ?? []).filter(Boolean);
+    ids.forEach((id) => mockStore.cancelTask(id));
+    const res: TaskCancelResult = {
+      requested: ids.length,
+      processed: ids.length,
+      skipped_ids: [],
+    };
+    return delay(res);
+  }
+
+  if (method === 'GET' && path === '/api/tasks/export') {
+    return delay('任务 ID,状态,阶段,文章标题,博主,触发方式,开始,结束,耗时(ms),tokens,成本(¥),错误信息\n');
+  }
+
   // Settings
   if (method === 'GET' && path === '/api/settings') return delay(settings);
   if (method === 'PATCH' && path === '/api/settings') {
@@ -159,22 +305,33 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
   }
 
   if (method === 'POST' && path === '/api/cookie') {
-    const text = (body as { text?: string } | undefined)?.text ?? '';
+    let sourceName = 'cookies.txt';
+    if (typeof FormData !== 'undefined' && body instanceof FormData) {
+      const file = body.get('file');
+      if (typeof File !== 'undefined' && file instanceof File) sourceName = file.name;
+    }
     settings = deepMerge(settings, {
-      cookie: { status: 'ok', last_tested_at: new Date().toISOString(), text },
+      cookie: { status: 'ok', source_name: sourceName, last_tested_at: settings.cookie.last_tested_at },
     });
-    return delay({ status: 'ok' });
+    return delay({ status: 'ok', source_name: sourceName });
   }
 
   if (method === 'POST' && path === '/api/cookie/test') {
     if (settings.cookie.status === 'missing') {
       throw apiError('cookie_missing', '未导入 Cookie', 403);
     }
-    return delay({ status: 'ok', handle_sample: '@laoqian-ai' });
+    settings = deepMerge(settings, {
+      cookie: {
+        status: 'ok',
+        source_name: settings.cookie.source_name,
+        last_tested_at: new Date().toISOString(),
+      },
+    });
+    return delay({ status: 'ok', detail: '博主页抓取和视频读取都通过' });
   }
 
   if (method === 'GET' && path === '/api/models') {
-    return delay({ ollama: availableModels });
+    return delay(availableModels);
   }
 
   throw apiError('route_not_found', `Mock 未处理: ${method} ${rawPath}`, 404);

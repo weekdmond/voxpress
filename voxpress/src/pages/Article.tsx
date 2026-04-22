@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { Page } from '@/layouts/AppShell';
 import { Avatar, Button, Chip, Icon } from '@/components/primitives';
 import {
+  BackgroundNotes,
   Drawer,
   Reader,
   ReaderArticle,
@@ -66,7 +67,12 @@ export function ArticlePage() {
         <ReaderToolbar
           left={
             <>
-              <Avatar size="md" id={art.creator_id} initial={art.source.creator_snapshot.name[0] ?? '?'} />
+              <Avatar
+                size="md"
+                id={art.creator_id}
+                initial={art.source.creator_snapshot.name[0] ?? '?'}
+                src={art.source.creator_snapshot.avatar_url}
+              />
               <div
                 style={{
                   display: 'flex',
@@ -113,6 +119,7 @@ export function ArticlePage() {
             {art.summary ? <p className="sum">{art.summary}</p> : null}
             <SourceCard source={art.source} />
             <div dangerouslySetInnerHTML={{ __html: art.content_html }} />
+            <BackgroundNotes notes={art.background_notes} />
             <div style={{ marginTop: 24, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {art.tags.map((t) => (
                 <Chip key={t} variant="accent">
@@ -121,7 +128,19 @@ export function ArticlePage() {
               ))}
             </div>
           </ReaderArticle>
-          {split ? <Drawer segments={art.segments} /> : null}
+          {split ? (
+            <Drawer
+              segments={art.segments}
+              rawText={art.raw_text}
+              correctedText={art.corrected_text}
+              correctionStatus={art.correction_status}
+              corrections={art.corrections}
+              whisperModel={art.whisper_model}
+              whisperLanguage={art.whisper_language}
+              correctorModel={art.corrector_model}
+              initialPromptUsed={art.initial_prompt_used}
+            />
+          ) : null}
         </ReaderBody>
       </Reader>
     </Page>

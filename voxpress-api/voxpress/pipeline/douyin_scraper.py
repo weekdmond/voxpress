@@ -27,6 +27,7 @@ class ScrapedCreator:
     verified: bool
     followers: int
     total_likes: int
+    video_count: int
     avatar_url: str | None
 
 
@@ -49,6 +50,7 @@ class ScrapedVideo:
 class ScrapedUserPage:
     creator: ScrapedCreator
     videos: list[ScrapedVideo]
+    complete: bool = True
 
 
 class ScrapeError(RuntimeError):
@@ -87,7 +89,10 @@ def _f2_conf(cookie: str) -> dict[str, Any]:
         },
         "cookie": _normalize_cookie(cookie),
         "proxies": {"http://": None, "https://": None},
-        "timeout": 20,
+        # f2 reuses `timeout` as both request timeout and inter-page sleep.
+        # Keep it low enough that creator-page pagination doesn't stall for
+        # 20s between every page.
+        "timeout": 2,
         "max_retries": 2,
     }
 
@@ -96,7 +101,7 @@ async def scrape_user_page(
     sec_uid: str,
     *,
     cookie: str | None,
-    max_videos: int = 20,
+    max_videos: int | None = None,
 ) -> ScrapedUserPage:
     if not cookie or not cookie.strip():
         raise ScrapeError(
@@ -126,61 +131,35 @@ async def scrape_user_page(
         bio=(pdict.get("signature") or "").strip() or None,
         region=pdict.get("ip_location") or pdict.get("country") or None,
         verified=bool(pdict.get("custom_verify") or pdict.get("enterprise_verify_reason")),
-        followers=int(pdict.get("follower_count") or 0),
+        followers=_pick_followers(pdict),
         total_likes=int(pdict.get("total_favorited") or 0),
+        video_count=int(pdict.get("aweme_count") or 0),
         avatar_url=_pick_avatar(pdict),
     )
 
-    # Videos (paginated async generator). `_iter_awemes` already returns
-    # ScrapedVideo objects shaped from f2's column-oriented filter — they
-    # carry title/duration/cover/timestamp but NO engagement stats (that
-    # endpoint doesn't expose them).
+    # Videos (paginated async generator). The raw aweme list already carries
+    # title, duration, cover, timestamps, and engagement stats, so we can
+    # shape metadata directly from the list endpoint without N extra detail
+    # requests.
     videos: list[ScrapedVideo] = []
+    complete = True
     try:
         async for page in handler.fetch_user_post_videos(
             sec_user_id=sec_uid,
             max_counts=max_videos,
-            page_counts=20,
+            page_counts=50,
         ):
             for sv in _iter_awemes(page):
                 videos.append(sv)
-                if len(videos) >= max_videos:
+                if max_videos is not None and len(videos) >= max_videos:
                     break
-            if len(videos) >= max_videos:
+            if max_videos is not None and len(videos) >= max_videos:
                 break
     except Exception as e:
         logger.warning("fetch_user_post_videos partial failure: %s", e)
+        complete = False
 
-    # Enrich stats in parallel via fetch_one_video (likes/comments/shares/
-    # collects). play_count is not exposed by the Douyin web API.
-    if videos:
-        await _enrich_stats(handler, videos, concurrency=5)
-
-    return ScrapedUserPage(creator=creator, videos=videos)
-
-
-async def _enrich_stats(handler, videos: list[ScrapedVideo], *, concurrency: int) -> None:
-    import asyncio
-
-    sem = asyncio.Semaphore(concurrency)
-
-    async def one(v: ScrapedVideo) -> None:
-        async with sem:
-            try:
-                det = await handler.fetch_one_video(aweme_id=v.id)
-                d = _to_dict(det)
-            except Exception as e:  # noqa: BLE001
-                logger.debug("fetch_one_video %s failed: %s", v.id, e)
-                return
-            if not isinstance(d, dict):
-                return
-            v.likes = int(d.get("digg_count") or 0)
-            v.comments = int(d.get("comment_count") or 0)
-            v.shares = int(d.get("share_count") or 0)
-            v.collects = int(d.get("collect_count") or 0)
-            # Douyin web doesn't return play_count; leave as 0.
-
-    await asyncio.gather(*(one(v) for v in videos), return_exceptions=True)
+    return ScrapedUserPage(creator=creator, videos=videos, complete=complete)
 
 
 # ─── helpers ────────────────────────────────────────
@@ -205,53 +184,49 @@ def _to_dict(obj: Any) -> dict[str, Any]:
 
 
 def _iter_awemes(page: Any) -> list[ScrapedVideo]:
-    """f2's UserPostFilter is COLUMN-oriented: every public attr (`aweme_id`,
-    `desc`, `video_duration`, `cover`, `create_time`, ...) is a parallel list
-    of length N. We zip the columns back into row-shaped ScrapedVideo.
-
-    Note: fetch_user_post_videos doesn't expose engagement stats
-    (like/play/comment counts) — those get filled later when an individual
-    task processes the video via yt-dlp."""
-    d = _to_dict(page)
-    if not isinstance(d, dict):
-        return []
-    ids = d.get("aweme_id") or []
-    if not isinstance(ids, list):
+    """Shape row-oriented video metadata from f2's raw aweme list."""
+    raw = getattr(page, "_to_raw", None)
+    data = raw() if callable(raw) else {}
+    if not isinstance(data, dict):
         return []
 
-    def col(name: str) -> list[Any]:
-        v = d.get(name)
-        return v if isinstance(v, list) else []
-
-    descs = col("desc")
-    durations = col("video_duration")  # milliseconds
-    covers = col("cover")
-    created = col("create_time")
+    awemes = data.get("aweme_list")
+    if not isinstance(awemes, list):
+        return []
     out: list[ScrapedVideo] = []
-    for i, aid in enumerate(ids):
-        aid_s = str(aid or "").strip()
+    for aweme in awemes:
+        if not isinstance(aweme, dict):
+            continue
+        aid_s = str(aweme.get("aweme_id") or "").strip()
         if not aid_s:
             continue
-        title = (str(descs[i]) if i < len(descs) else "").strip() or f"视频 {aid_s[-8:]}"
-        dur_ms = durations[i] if i < len(durations) else 0
+        if aweme.get("images") or aweme.get("image_post_info") is not None:
+            continue
+        video = aweme.get("video") or {}
+        if not isinstance(video, dict) or not video:
+            # Douyin creator feeds may include image posts / other non-video
+            # work types. Skip them here so the import list only contains real
+            # playable videos that the downstream audio pipeline can handle.
+            continue
+        title = str(aweme.get("desc") or "").strip() or f"视频 {aid_s[-8:]}"
+        stats = aweme.get("statistics") or {}
+        dur_ms = video.get("duration") or aweme.get("duration") or 0
         try:
             dur_sec = int(int(dur_ms or 0) // 1000)
         except (TypeError, ValueError):
             dur_sec = 0
-        cover = covers[i] if i < len(covers) else None
-        if isinstance(cover, list):
-            cover = cover[0] if cover else None
-        ts = _parse_f2_create_time(created[i] if i < len(created) else None)
+        cover = _pick_cover(video)
+        ts = _parse_f2_create_time(aweme.get("create_time"))
         out.append(
             ScrapedVideo(
                 id=aid_s,
                 title=title,
                 duration_sec=dur_sec,
-                likes=0,
-                plays=0,
-                comments=0,
-                shares=0,
-                collects=0,
+                likes=int(stats.get("digg_count") or 0),
+                plays=int(stats.get("play_count") or 0),
+                comments=int(stats.get("comment_count") or 0),
+                shares=int(stats.get("share_count") or 0),
+                collects=int(stats.get("collect_count") or 0),
                 published_at_ts=ts,
                 cover_url=str(cover) if cover else None,
                 source_url=f"https://www.douyin.com/video/{aid_s}",
@@ -279,12 +254,36 @@ def _parse_f2_create_time(v: Any) -> int:
 
 
 def _pick_avatar(pdict: dict[str, Any]) -> str | None:
+    avatar_url = pdict.get("avatar_url")
+    if isinstance(avatar_url, str) and avatar_url.strip():
+        return avatar_url.strip()
     for key in ("avatar_larger", "avatar_medium", "avatar_thumb"):
         av = pdict.get(key)
         if isinstance(av, dict):
             urls = av.get("url_list")
             if isinstance(urls, list) and urls:
                 return urls[0]
+    return None
+
+
+def _pick_followers(pdict: dict[str, Any]) -> int:
+    # Douyin profile payload can expose both follower_count and
+    # mplatform_followers_count; the page UI aligns with the latter.
+    for key in ("mplatform_followers_count", "follower_count"):
+        try:
+            return int(pdict.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _pick_cover(video: dict[str, Any]) -> str | None:
+    for key in ("origin_cover", "cover", "dynamic_cover", "animated_cover"):
+        block = video.get(key)
+        if isinstance(block, dict):
+            urls = block.get("url_list")
+            if isinstance(urls, list) and urls:
+                return str(urls[0])
     return None
 
 

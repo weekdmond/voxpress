@@ -2,66 +2,73 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
+from uuid import UUID
 
-logger = logging.getLogger(__name__)
+import asyncpg
+from sqlalchemy import text
+from sqlalchemy.engine import make_url
+
+from voxpress.config import settings
+from voxpress.db import engine
 
 TaskEventKind = Literal["create", "update", "remove"]
+TASK_EVENTS_CHANNEL = "task_events"
 
 
-@dataclass
+@dataclass(slots=True)
 class TaskEvent:
     kind: TaskEventKind
-    payload: dict[str, Any]
+    task_id: str
 
-    def sse(self) -> dict[str, str]:
+    def sse(self, payload: dict) -> dict[str, str]:
         return {
             "event": f"task.{self.kind}",
-            "data": json.dumps(self.payload, default=str, ensure_ascii=False),
+            "data": json.dumps(payload, default=str, ensure_ascii=False),
         }
 
 
-class TaskBroker:
-    """In-memory fan-out. MVP single-worker only."""
+def _asyncpg_connect_args() -> dict:
+    url = make_url(settings.db_url)
+    return {
+        "user": url.username,
+        "password": url.password,
+        "database": (url.database or "").lstrip("/"),
+        "host": url.host or "127.0.0.1",
+        "port": url.port or 5432,
+    }
 
-    def __init__(self) -> None:
-        self._subs: set[asyncio.Queue[TaskEvent]] = set()
 
-    async def publish(self, event: TaskEvent) -> None:
-        dead: list[asyncio.Queue[TaskEvent]] = []
-        for q in list(self._subs):
-            try:
-                q.put_nowait(event)
-            except asyncio.QueueFull:
-                logger.warning("SSE subscriber queue full, dropping")
-                dead.append(q)
-        for q in dead:
-            self._subs.discard(q)
+async def publish_task_event(kind: TaskEventKind, task_id: UUID | str) -> None:
+    payload = json.dumps({"kind": kind, "task_id": str(task_id)}, ensure_ascii=False)
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("select pg_notify(:channel, :payload)"),
+            {"channel": TASK_EVENTS_CHANNEL, "payload": payload},
+        )
 
-    def subscribe(self) -> asyncio.Queue[TaskEvent]:
-        q: asyncio.Queue[TaskEvent] = asyncio.Queue(maxsize=256)
-        self._subs.add(q)
-        return q
 
-    def unsubscribe(self, q: asyncio.Queue[TaskEvent]) -> None:
-        self._subs.discard(q)
+async def listen_task_events() -> AsyncIterator[TaskEvent]:
+    queue: asyncio.Queue[TaskEvent | None] = asyncio.Queue(maxsize=512)
+    conn = await asyncpg.connect(**_asyncpg_connect_args())
 
-    async def stream(self, initial: list[TaskEvent]) -> AsyncIterator[dict[str, str]]:
-        q = self.subscribe()
+    def _listener(_: asyncpg.Connection, __: int, ___: str, payload: str) -> None:
         try:
-            for ev in initial:
-                yield ev.sse()
-            while True:
-                try:
-                    ev = await asyncio.wait_for(q.get(), timeout=20.0)
-                    yield ev.sse()
-                except asyncio.TimeoutError:
-                    yield {"event": "ping", "data": ""}
-        finally:
-            self.unsubscribe(q)
+            data = json.loads(payload)
+            event = TaskEvent(kind=data["kind"], task_id=str(data["task_id"]))
+            queue.put_nowait(event)
+        except Exception:
+            return
 
-
-broker = TaskBroker()
+    await conn.add_listener(TASK_EVENTS_CHANNEL, _listener)
+    try:
+        while True:
+            event = await queue.get()
+            if event is None:
+                break
+            yield event
+    finally:
+        await conn.remove_listener(TASK_EVENTS_CHANNEL, _listener)
+        await conn.close()

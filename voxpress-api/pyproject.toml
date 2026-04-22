@@ -14,12 +14,14 @@ dependencies = [
   "sse-starlette>=2.1",
   "httpx[socks]>=0.27",
   "python-multipart>=0.0.9",
+  "f2>=0.0.1.7",
   "yt-dlp>=2026.3.17",
   "mlx-whisper>=0.4.3",
   "mistune>=3.2.0",
   "playwright>=1.58.0",
   "playwright-stealth>=2.0.3",
   "patchright>=1.58.2",
+  "oss2>=2.19.1",
 ]
 
 [dependency-groups]

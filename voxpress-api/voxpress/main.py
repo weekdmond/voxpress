@@ -9,11 +9,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from voxpress import __version__
 from voxpress.config import settings
 from voxpress.errors import ApiError, api_error_handler
-from voxpress.pipeline import runner
 from voxpress.routers import (
     articles,
     creators,
     health,
+    media,
     resolve,
     settings as settings_router,
     tasks,
@@ -26,10 +26,6 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # Startup: reconcile orphan tasks from previous run
-    orphaned = await runner.reconcile()
-    if orphaned:
-        logger.warning("reconciled %d orphan task(s) from previous run", orphaned)
     yield
 
 
@@ -48,6 +44,7 @@ def create_app() -> FastAPI:
     app.include_router(videos.router)
     app.include_router(articles.router)
     app.include_router(tasks.router)
+    app.include_router(media.router)
     app.include_router(resolve.router)
     app.include_router(settings_router.router)
     return app

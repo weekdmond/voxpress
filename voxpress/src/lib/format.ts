@@ -7,6 +7,17 @@ export function formatCount(n: number): string {
   return `${Math.round(w)}w`;
 }
 
+export function formatCountZh(n: number): string {
+  if (n < 10000) return `${n}`;
+  if (n < 100000000) {
+    const w = n / 10000;
+    if (w < 100) return `${w.toFixed(1).replace(/\.0$/, '')}万`;
+    return `${Math.round(w)}万`;
+  }
+  const yi = n / 100000000;
+  return `${yi.toFixed(1).replace(/\.0$/, '')}亿`;
+}
+
 export function formatDuration(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
@@ -40,6 +51,26 @@ export function formatRelative(iso: string): string {
 export function formatDate(iso: string): string {
   const d = new Date(iso);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export function formatDateTime(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+export function formatMoney(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '¥0.00';
+  return `¥${n.toFixed(n < 1 ? 4 : 2).replace(/0+$/, '').replace(/\.$/, '.00')}`;
+}
+
+export function formatDurationMs(ms: number | null | undefined): string {
+  if (!ms || ms <= 0) return '—';
+  if (ms < 1000) return `${ms}ms`;
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  const rem = sec % 60;
+  return rem === 0 ? `${min}m` : `${min}m ${rem}s`;
 }
 
 export function firstGrapheme(s: string): string {

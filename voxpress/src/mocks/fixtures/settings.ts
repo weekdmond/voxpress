@@ -2,13 +2,23 @@ import type { Settings } from '@/types/api';
 
 export const defaultSettings: Settings = {
   llm: {
-    backend: 'ollama',
-    model: 'qwen2.5:72b',
-    concurrency: 2,
+    backend: 'dashscope',
+    model: 'qwen-plus',
+    concurrency: 4,
   },
   whisper: {
-    model: 'large-v3',
+    model: 'qwen3-asr-flash-filetrans',
     language: 'zh',
+    enable_initial_prompt: true,
+  },
+  corrector: {
+    enabled: true,
+    model: 'qwen-turbo',
+    template:
+      '你是中文语音转写校对员，只修正明显的同音字和专有名词错误，不做润色。',
+  },
+  article: {
+    generate_background_notes: true,
   },
   prompt: {
     version: 'v1.0',
@@ -18,7 +28,7 @@ export const defaultSettings: Settings = {
   cookie: {
     status: 'missing',
     last_tested_at: null,
-    text: null,
+    source_name: null,
   },
   storage: {
     audio_retain_days: 7,
@@ -26,4 +36,8 @@ export const defaultSettings: Settings = {
   },
 };
 
-export const availableModels = ['qwen2.5:72b', 'qwen2.5:32b', 'deepseek-r1:70b', 'llama3.1:70b'];
+export const availableModels = {
+  llm: ['qwen-plus', 'qwen-plus-latest', 'qwen-turbo', 'qwen-flash'],
+  corrector: ['qwen-turbo', 'qwen-flash', 'qwen-plus'],
+  transcribe: ['qwen3-asr-flash-filetrans'],
+};

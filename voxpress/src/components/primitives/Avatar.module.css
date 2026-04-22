@@ -9,6 +9,11 @@
   user-select: none;
   letter-spacing: -0.01em;
 }
+.image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 .xs { width: 18px; height: 18px; border-radius: 50%; font-size: 8.5px; font-weight: 600; }
 .sm { width: 24px; height: 24px; border-radius: 50%; font-size: 10px; font-weight: 600; }
 .md { width: 32px; height: 32px; border-radius: 50%; font-size: 12px; font-weight: 600; }

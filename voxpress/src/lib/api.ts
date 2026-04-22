@@ -13,12 +13,14 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers || {});
+  const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData;
+  if (!isFormData && init?.body != null && !headers.has('content-type')) {
+    headers.set('content-type', 'application/json');
+  }
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: {
-      'content-type': 'application/json',
-      ...(init?.headers || {}),
-    },
+    headers,
   });
   if (!res.ok) {
     let code = 'unknown_error';
@@ -41,10 +43,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.text()) as unknown as T;
 }
 
+export function apiUrl(path: string): string {
+  if (!path) return BASE;
+  if (/^https?:\/\//.test(path)) return path;
+  return `${BASE}${path}`;
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body: body == null ? undefined : JSON.stringify(body) }),
+  postForm: <T>(path: string, form: FormData) =>
+    request<T>(path, { method: 'POST', body: form }),
   patch: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PATCH', body: body == null ? undefined : JSON.stringify(body) }),
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),

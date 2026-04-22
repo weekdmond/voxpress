@@ -55,6 +55,16 @@ class CookieMissing(ApiError):
     code = "cookie_missing"
 
 
+class CookieInvalid(ApiError):
+    status_code = 403
+    code = "cookie_invalid"
+
+
+class InvalidCookieFile(ApiError):
+    status_code = 400
+    code = "invalid_cookie_file"
+
+
 async def api_error_handler(_: Request, exc: ApiError) -> JSONResponse:
     payload = {"error": {"code": exc.code, "message": exc.message}}
     if exc.detail is not None:

@@ -6,6 +6,7 @@ import { ArticlesPage } from './pages/Articles';
 import { ArticlePage } from './pages/Article';
 import { ImportPage } from './pages/Import';
 import { SettingsPage } from './pages/Settings';
+import { TasksPage } from './pages/Tasks';
 
 export const router = createBrowserRouter([
   {
@@ -13,8 +14,10 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <HomePage /> },
       { path: 'library', element: <LibraryPage /> },
+      { path: 'library/:creatorId', element: <ImportPage /> },
       { path: 'articles', element: <ArticlesPage /> },
       { path: 'articles/:id', element: <ArticlePage /> },
+      { path: 'tasks', element: <TasksPage /> },
       { path: 'import/:creatorId', element: <ImportPage /> },
       { path: 'settings', element: <SettingsPage /> },
     ],

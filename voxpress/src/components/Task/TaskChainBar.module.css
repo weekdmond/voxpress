@@ -1,0 +1,74 @@
+.bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+
+.step {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: var(--vp-bg-2);
+  color: var(--vp-ink-4);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  position: relative;
+  transition: background 120ms var(--vp-ease), color 120ms var(--vp-ease);
+  cursor: help;
+}
+
+.step svg {
+  position: relative;
+  z-index: 1;
+  width: 13px;
+  height: 13px;
+}
+
+.done {
+  background: var(--vp-ok-soft);
+  color: var(--vp-ok);
+}
+
+.running {
+  background: #e4ecf4;
+  color: #3c6495;
+  overflow: hidden;
+}
+
+.running::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(60, 100, 149, 0.3), transparent);
+  animation: vp-shimmer 1.4s infinite;
+}
+
+.failed {
+  background: #f8e6e6;
+  color: #a84040;
+}
+
+.queued {
+  background: var(--vp-bg-2);
+  color: var(--vp-ink-4);
+}
+
+.sep {
+  width: 8px;
+  height: 1px;
+  background: var(--vp-line-strong);
+  flex-shrink: 0;
+}
+
+.compact .step {
+  width: 22px;
+  height: 22px;
+}
+.compact .step svg {
+  width: 11px;
+  height: 11px;
+}
+.compact .sep {
+  width: 6px;
+}

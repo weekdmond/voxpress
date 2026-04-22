@@ -14,11 +14,18 @@ export type IconName =
   | 'check'
   | 'play'
   | 'heart'
+  | 'clock'
+  | 'comment'
+  | 'bookmark'
+  | 'user'
   | 'swap'
   | 'refresh'
   | 'tag'
   | 'external'
-  | 'chevron';
+  | 'chevron'
+  | 'mic'
+  | 'zap'
+  | 'save';
 
 export interface IconProps {
   name: IconName;

@@ -5,6 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from voxpress import __version__
+from voxpress.config import settings
 from voxpress.db import get_session
 from voxpress.schemas import HealthOut
 
@@ -18,4 +19,5 @@ async def health(s: AsyncSession = Depends(get_session)) -> HealthOut:
         await s.execute(text("SELECT 1"))
     except Exception:
         db_ok = False
-    return HealthOut(ok=db_ok, version=__version__, ollama=False, whisper=False, db=db_ok)
+    dashscope_ok = settings.dashscope_enabled
+    return HealthOut(ok=db_ok and dashscope_ok, version=__version__, ollama=dashscope_ok, whisper=dashscope_ok, db=db_ok)

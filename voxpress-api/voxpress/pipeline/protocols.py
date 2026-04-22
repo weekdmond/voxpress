@@ -26,11 +26,19 @@ class ExtractorResult:
     cover_url: str | None
     source_url: str
     audio_path: Path
+    video_path: Path | None = None
+    media_object_key: str | None = None
+    audio_object_key: str | None = None
 
 
 @dataclass
 class TranscriptResult:
     segments: list[tuple[int, str]]  # (ts_sec, text)
+    raw_text: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.raw_text:
+            self.raw_text = "\n".join(text for _ts, text in self.segments if text).strip()
 
 
 @runtime_checkable
@@ -42,16 +50,21 @@ class Extractor(Protocol):
 
 @runtime_checkable
 class Transcriber(Protocol):
-    """Turns an audio file into timed segments. Implementations: mlx-whisper, faster-whisper, stub."""
+    """Turns an audio file into timed segments. Implementations: DashScope ASR, stub."""
 
-    async def transcribe(self, audio_path: Path, language: str = "zh") -> TranscriptResult: ...
+    async def transcribe(
+        self,
+        audio_path: Path,
+        language: str = "zh",
+        initial_prompt: str | None = None,
+    ) -> TranscriptResult: ...
 
 
 @runtime_checkable
 class LLMBackend(Protocol):
     """Turns a raw transcript into a structured article.
 
-    Implementations: OllamaLLM, (future) ClaudeLLM, stub."""
+    Implementations: DashScopeLLM, stub."""
 
     async def organize(
         self,
@@ -60,4 +73,14 @@ class LLMBackend(Protocol):
         title_hint: str,
         creator_hint: str,
         prompt_template: str,
-    ) -> dict: ...  # {title, summary, content_md, content_html, word_count, tags}
+    ) -> dict: ...  # {title, summary, content_md, tags}
+
+    async def annotate_background(
+        self,
+        *,
+        transcript: str,
+        title_hint: str,
+        creator_hint: str,
+        article_title: str,
+        article_summary: str,
+    ) -> dict | None: ...

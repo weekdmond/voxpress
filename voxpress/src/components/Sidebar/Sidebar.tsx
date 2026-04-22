@@ -29,6 +29,7 @@ export function Sidebar() {
   const items: NavItem[] = [
     { to: '/', label: '首页', icon: 'home', end: true },
     { to: '/library', label: '博主库', icon: 'users', count: creators?.total },
+    { to: '/tasks', label: '任务', icon: 'swap' },
     { to: '/articles', label: '文章', icon: 'doc' },
     { to: '/settings', label: '设置', icon: 'cog' },
   ];
@@ -71,10 +72,10 @@ export function Sidebar() {
           {recent.map((c) => (
             <NavLink
               key={c.id}
-              to={{ pathname: '/library', search: `?focus=${c.id}` }}
+              to={`/library/${c.id}`}
               className={s.creator}
             >
-              <Avatar size="sm" id={c.id} initial={c.initial} />
+              <Avatar size="sm" id={c.id} initial={c.initial} src={c.avatar_url} />
               <span className={s.creatorName}>{c.name}</span>
               <span className={s.creatorCount}>{c.article_count}</span>
             </NavLink>

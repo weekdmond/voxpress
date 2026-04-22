@@ -4,7 +4,7 @@ import { creators } from './fixtures/creators';
 
 type Listener = (e: TaskStreamEvent) => void;
 
-const STAGES: TaskStage[] = ['download', 'transcribe', 'organize', 'save'];
+const STAGES: TaskStage[] = ['download', 'transcribe', 'correct', 'organize', 'save'];
 
 function makeTask(partial: Partial<Task> & { id: string; source_url: string }): Task {
   const now = new Date().toISOString();
@@ -21,7 +21,18 @@ function makeTask(partial: Partial<Task> & { id: string; source_url: string }): 
     eta_sec: partial.eta_sec ?? 420,
     detail: partial.detail ?? null,
     article_id: null,
+    article_title: partial.article_title ?? null,
+    cover_url: partial.cover_url ?? null,
     error: null,
+    trigger_kind: partial.trigger_kind ?? 'manual',
+    rerun_of_task_id: partial.rerun_of_task_id ?? null,
+    resume_from_stage: partial.resume_from_stage ?? null,
+    primary_model: partial.primary_model ?? null,
+    elapsed_ms: partial.elapsed_ms ?? null,
+    input_tokens: partial.input_tokens ?? 0,
+    output_tokens: partial.output_tokens ?? 0,
+    total_tokens: partial.total_tokens ?? 0,
+    cost_cny: partial.cost_cny ?? 0,
     started_at: now,
     updated_at: now,
     finished_at: null,
@@ -45,8 +56,11 @@ class MockStore {
         creator_initial: '老',
         stage: 'transcribe',
         progress: 62,
-        detail: 'mlx-whisper large-v3 · 已转写 5:12 / 8:32',
+        detail: 'DashScope qwen3-asr-flash-filetrans · 已转写 5:12 / 8:32',
         eta_sec: 272,
+        primary_model: 'qwen3-asr-flash-filetrans',
+        total_tokens: 0,
+        cost_cny: 0.07,
       }),
       makeTask({
         id: 't_02',
@@ -56,9 +70,12 @@ class MockStore {
         creator_name: '武侯科技',
         creator_initial: '武',
         stage: 'organize',
-        progress: 28,
-        detail: 'Ollama qwen2.5:72b · 第 2/7 段',
+        progress: 79,
+        detail: 'DashScope qwen-plus · 第 2/7 段',
         eta_sec: 148,
+        primary_model: 'qwen-plus',
+        total_tokens: 12840,
+        cost_cny: 0.0124,
       }),
       makeTask({
         id: 't_03',
@@ -69,8 +86,9 @@ class MockStore {
         creator_initial: '南',
         stage: 'download',
         progress: 8,
-        detail: 'yt-dlp · 读取元数据',
+        detail: 'Douyin Web API · 读取视频',
         eta_sec: 520,
+        primary_model: 'qwen3-asr-flash-filetrans',
       }),
     ];
     seeds.forEach((t) => this.tasks.set(t.id, t));
@@ -108,9 +126,11 @@ class MockStore {
       creator_name: c.name,
       creator_initial: c.initial,
       stage: 'download',
+      status: 'queued',
       progress: 0,
-      detail: 'yt-dlp · 等待元数据',
+      detail: '等待调度',
       eta_sec: 480,
+      trigger_kind: 'manual',
     });
     this.tasks.set(id, task);
     this.broadcast({ type: 'create', task });
@@ -148,6 +168,7 @@ class MockStore {
       t.progress = Math.min(100, t.progress + delta);
       t.eta_sec = Math.max(0, (t.eta_sec ?? 0) - 6);
       t.updated_at = new Date().toISOString();
+      t.elapsed_ms = (t.elapsed_ms ?? 0) + 900;
       // stage advance heuristic
       const idx = STAGES.indexOf(t.stage);
       const stageWindow = 100 / STAGES.length;
@@ -161,6 +182,7 @@ class MockStore {
         t.stage = 'save';
         t.finished_at = new Date().toISOString();
         t.article_id = `a_new_${t.id}`;
+        t.article_title = t.title_guess;
         this.broadcast({ type: 'update', task: { ...t } });
         setTimeout(() => {
           this.tasks.delete(t.id);
@@ -176,11 +198,13 @@ class MockStore {
 function stageDetail(stage: TaskStage): string {
   switch (stage) {
     case 'download':
-      return 'yt-dlp · 下载中';
+      return 'Douyin Web API · 下载中';
     case 'transcribe':
-      return 'mlx-whisper large-v3';
+      return 'DashScope qwen3-asr-flash-filetrans';
+    case 'correct':
+      return 'DashScope qwen-turbo · 纠错中';
     case 'organize':
-      return 'Ollama qwen2.5:72b · 整理中';
+      return 'DashScope qwen-plus · 整理中';
     case 'save':
       return '写入数据库';
   }
