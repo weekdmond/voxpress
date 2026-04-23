@@ -3,15 +3,17 @@ from __future__ import annotations
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
+from voxpress.config import settings
+
 
 CHAT_PRICING_PER_1K: dict[str, tuple[Decimal, Decimal]] = {
-    "qwen-plus": (Decimal("0.0008"), Decimal("0.0020")),
-    "qwen-plus-latest": (Decimal("0.0008"), Decimal("0.0020")),
-    "qwen-turbo": (Decimal("0.0003"), Decimal("0.0006")),
+    model: (Decimal(str(price[0])), Decimal(str(price[1])))
+    for model, price in settings.dashscope_chat_pricing_map.items()
 }
 
 ASR_PRICING_PER_SEC: dict[str, Decimal] = {
-    "qwen3-asr-flash-filetrans": Decimal("0.00022"),
+    model: Decimal(str(price))
+    for model, price in settings.dashscope_asr_pricing_map.items()
 }
 
 

@@ -153,7 +153,7 @@ export function SettingsPage() {
             <option value="dashscope">DashScope (阿里云百炼)</option>
           </Select>
         </Field>
-        <Field label="模型" help="推荐 qwen-plus；整理质量和速度更平衡">
+        <Field label="模型" help="推荐 qwen3.6-plus；当前千问旗舰模型，整理质量更稳">
           <Select
             value={settings.llm.model}
             onChange={(e) => patch.mutate({ llm: { ...settings.llm, model: e.target.value } })}
@@ -283,7 +283,7 @@ export function SettingsPage() {
             <span>{settings.corrector.enabled ? '自动运行 correct 阶段' : '跳过 correct 阶段'}</span>
           </label>
         </Field>
-        <Field label="纠错模型" help="推荐 qwen-turbo；更适合做轻量纠错">
+        <Field label="纠错模型" help="推荐 qwen-turbo-latest；更适合做轻量纠错">
           <Select
             value={settings.corrector.model}
             onChange={(e) =>

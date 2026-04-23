@@ -27,6 +27,7 @@ class OllamaLLM(LLMBackend):
         title_hint: str,
         creator_hint: str,
         prompt_template: str,
+        duration_sec: int | None = None,
     ) -> dict[str, Any]:
         system = prompt_template or DEFAULT_ORGANIZER_TEMPLATE
         user = (

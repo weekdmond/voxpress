@@ -9,12 +9,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sse_starlette.sse import EventSourceResponse
-from sqlalchemy import select
+from sqlalchemy import Text, cast, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from voxpress.db import get_session, session_scope
 from voxpress.errors import InvalidUrl, TaskNotFound
-from voxpress.models import Task, Transcript, Video
+from voxpress.models import Article, Creator, Task, TaskStageRun, Transcript, Video
 from voxpress.schemas import (
     Page,
     TaskBatchIn,
@@ -71,6 +71,8 @@ def _time_cutoff(value: str | None) -> datetime | None:
     now = _local_now()
     if value == "1h":
         return now - timedelta(hours=1)
+    if value == "24h":
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
     if value == "today":
         return now.replace(hour=0, minute=0, second=0, microsecond=0)
     if value == "7d":
@@ -111,104 +113,62 @@ async def _create_task(
     return task
 
 
-async def _load_payloads(
-    s: AsyncSession,
+def _task_filters(
     *,
     status: str | None,
     stage: str | None,
     time_range: str | None,
     q: str | None,
     model: str | None,
-) -> list[dict[str, Any]]:
-    stmt = select(Task)
+) -> list[Any]:
+    clauses: list[Any] = []
     if status == "active":
-        stmt = stmt.where(Task.status.in_(ACTIVE_STATUSES))
+        clauses.append(Task.status.in_(ACTIVE_STATUSES))
     elif status:
-        stmt = stmt.where(Task.status == status)
+        clauses.append(Task.status == status)
     if stage:
-        stmt = stmt.where(Task.stage == stage)
+        clauses.append(Task.stage == stage)
     cutoff = _time_cutoff(time_range)
     if cutoff is not None:
-        stmt = stmt.where(Task.started_at >= cutoff)
-    stmt = stmt.order_by(Task.started_at.desc())
-    tasks = list((await s.scalars(stmt)).all())
-    payloads = await build_task_payloads([task.id for task in tasks])
-
+        clauses.append(Task.started_at >= cutoff)
     if model:
-        payloads = [item for item in payloads if model in set(item.get("models") or [])]
-
+        clauses.append(
+            exists(
+                select(TaskStageRun.id).where(
+                    TaskStageRun.task_id == Task.id,
+                    TaskStageRun.model == model,
+                )
+            )
+        )
     if q:
-        needle = q.strip().casefold()
-        payloads = [
-            item
-            for item in payloads
-            if needle in (item.get("id") or "").casefold()
-            or needle in (item.get("title_guess") or "").casefold()
-            or needle in (item.get("article_title") or "").casefold()
-            or needle in (item.get("creator_name") or "").casefold()
-        ]
+        like = f"%{q.strip()}%"
+        clauses.append(
+            or_(
+                cast(Task.id, Text).ilike(like),
+                Task.title_guess.ilike(like),
+                exists(select(Creator.id).where(Creator.id == Task.creator_id, Creator.name.ilike(like))),
+                exists(
+                    select(Article.id).where(
+                        or_(Article.id == Task.article_id, Article.video_id == Task.video_id),
+                        Article.title.ilike(like),
+                    )
+                ),
+            )
+        )
+    return clauses
 
-    return payloads
 
-
-def _sort_payloads(items: list[dict[str, Any]], sort: str) -> list[dict[str, Any]]:
+def _task_sort_order(sort: str) -> list[Any]:
     sort = sort or "started_at:desc"
     field, _, direction = sort.partition(":")
-    reverse = direction != "asc"
-
-    key_map = {
-        "started_at": lambda item: item.get("started_at") or "",
-        "elapsed_ms": lambda item: int(item.get("elapsed_ms") or 0),
-        "total_tokens": lambda item: int(item.get("total_tokens") or 0),
-        "cost_cny": lambda item: float(item.get("cost_cny") or 0.0),
-    }
-    key_fn = key_map.get(field, key_map["started_at"])
-    return sorted(items, key=key_fn, reverse=reverse)
-
-
-def _page_slice(items: list[dict[str, Any]], *, page: int, limit: int) -> list[dict[str, Any]]:
-    start = max(0, (page - 1) * limit)
-    end = start + limit
-    return items[start:end]
-
-
-def _today_stats(items: list[dict[str, Any]]) -> tuple[int, float, float, int, int]:
-    start = _local_now().replace(hour=0, minute=0, second=0, microsecond=0)
-    today = [
-        item
-        for item in items
-        if item.get("started_at") and datetime.fromisoformat(item["started_at"]) >= start
-    ]
-    success = sum(1 for item in today if item.get("status") == "done")
-    failed = sum(1 for item in today if item.get("status") == "failed")
-    denom = success + failed
-    success_rate = round((success / denom) * 100, 1) if denom else 0.0
-    total_cost = round(sum(float(item.get("cost_cny") or 0.0) for item in today), 4)
-    total_tokens = sum(int(item.get("total_tokens") or 0) for item in today)
-    elapsed_samples = [int(item.get("elapsed_ms") or 0) for item in today if item.get("elapsed_ms")]
-    avg_elapsed = int(sum(elapsed_samples) / len(elapsed_samples)) if elapsed_samples else 0
-    return len(today), success_rate, total_cost, total_tokens, avg_elapsed
-
-
-def _status_counts(items: list[dict[str, Any]]) -> dict[str, int]:
-    counts = {"running": 0, "queued": 0, "done": 0, "failed": 0, "canceled": 0}
-    for item in items:
-        status = str(item.get("status") or "")
-        if status in counts:
-            counts[status] += 1
-    counts["active"] = counts["running"] + counts["queued"]
-    return counts
-
-
-def _model_facets(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    counts: dict[str, int] = {}
-    for item in items:
-        for model in item.get("models") or []:
-            counts[model] = counts.get(model, 0) + 1
-    return [
-        {"value": model, "count": count}
-        for model, count in sorted(counts.items(), key=lambda row: (-row[1], row[0]))
-    ]
+    desc = direction != "asc"
+    expr = {
+        "started_at": Task.started_at,
+        "elapsed_ms": Task.elapsed_ms,
+        "total_tokens": Task.total_tokens,
+        "cost_cny": Task.cost_cny,
+    }.get(field, Task.started_at)
+    return [expr.asc().nulls_last()] if not desc else [expr.desc().nulls_last(), Task.started_at.desc()]
 
 
 async def _resolve_rerun_stage(s: AsyncSession, task: Task, mode: str) -> str | None:
@@ -259,22 +219,37 @@ async def list_tasks(
     stage: str | None = Query(None),
     model: str | None = Query(None),
     time_range: str | None = Query(None),
+    since: str | None = Query(None),
     q: str | None = Query(None),
     sort: str = Query("started_at:desc"),
     page: int = Query(1, ge=1),
+    offset: int | None = Query(None, ge=0),
     limit: int = Query(20, ge=1, le=200),
 ) -> Page[TaskOut]:
-    payloads = await _load_payloads(
-        s,
+    clauses = _task_filters(
         status=status,
         stage=stage,
-        time_range=time_range,
+        time_range=time_range or since,
         q=q,
         model=model,
     )
-    total = len(payloads)
-    items = _page_slice(_sort_payloads(payloads, sort), page=page, limit=limit)
-    return Page(items=[TaskOut.model_validate(item) for item in items], cursor=None, total=total)
+    total = await s.scalar(select(func.count()).select_from(Task).where(*clauses))
+    resolved_offset = offset if offset is not None else max(0, (page - 1) * limit)
+    task_ids = list(
+        (
+            await s.scalars(
+                select(Task.id)
+                .where(*clauses)
+                .order_by(*_task_sort_order(sort))
+                .offset(resolved_offset)
+                .limit(limit)
+            )
+        ).all()
+    )
+    payloads = await build_task_payloads(task_ids)
+    payload_map = {item["id"]: item for item in payloads}
+    ordered = [payload_map[str(task_id)] for task_id in task_ids if str(task_id) in payload_map]
+    return Page(items=[TaskOut.model_validate(item) for item in ordered], cursor=None, total=total or 0)
 
 
 @router.get("/summary", response_model=TaskSummaryOut)
@@ -284,25 +259,88 @@ async def tasks_summary(
     stage: str | None = Query(None),
     model: str | None = Query(None),
     time_range: str | None = Query(None),
+    since: str | None = Query(None),
     q: str | None = Query(None),
 ) -> TaskSummaryOut:
-    payloads = await _load_payloads(
-        s,
+    clauses = _task_filters(
         status=status,
         stage=stage,
-        time_range=time_range,
+        time_range=time_range or since,
         q=q,
         model=model,
     )
-    today_tasks, success_rate, total_cost, total_tokens, avg_elapsed = _today_stats(payloads)
+    today_cutoff = _local_now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_tasks = int(await s.scalar(select(func.count()).select_from(Task).where(*clauses, Task.started_at >= today_cutoff)) or 0)
+    today_success = int(
+        await s.scalar(
+            select(func.count()).select_from(Task).where(*clauses, Task.started_at >= today_cutoff, Task.status == "done")
+        )
+        or 0
+    )
+    today_failed = int(
+        await s.scalar(
+            select(func.count()).select_from(Task).where(*clauses, Task.started_at >= today_cutoff, Task.status == "failed")
+        )
+        or 0
+    )
+    denom = today_success + today_failed
+    success_rate = round((today_success / denom) * 100, 1) if denom else 0.0
+    total_cost = round(
+        float(
+            await s.scalar(
+                select(func.coalesce(func.sum(Task.cost_cny), 0)).where(*clauses, Task.started_at >= today_cutoff)
+            )
+            or 0.0
+        ),
+        4,
+    )
+    total_tokens = int(
+        await s.scalar(
+            select(func.coalesce(func.sum(Task.total_tokens), 0)).where(*clauses, Task.started_at >= today_cutoff)
+        )
+        or 0
+    )
+    avg_elapsed = int(
+        await s.scalar(
+            select(func.coalesce(func.avg(Task.elapsed_ms), 0)).where(
+                *clauses,
+                Task.started_at >= today_cutoff,
+                Task.elapsed_ms.is_not(None),
+            )
+        )
+        or 0
+    )
+    status_rows = (
+        await s.execute(select(Task.status, func.count()).where(*clauses).group_by(Task.status))
+    ).all()
+    status_counts = {"running": 0, "queued": 0, "done": 0, "failed": 0, "canceled": 0}
+    for task_status, count in status_rows:
+        if task_status in status_counts:
+            status_counts[task_status] = int(count)
+    status_counts["active"] = status_counts["running"] + status_counts["queued"]
+    task_ids_subquery = select(Task.id).where(*clauses).subquery()
+    model_rows = (
+        await s.execute(
+            select(TaskStageRun.model, func.count(func.distinct(TaskStageRun.task_id)))
+            .where(
+                TaskStageRun.model.is_not(None),
+                TaskStageRun.task_id.in_(select(task_ids_subquery.c.id)),
+            )
+            .group_by(TaskStageRun.model)
+        )
+    ).all()
     return TaskSummaryOut(
         today_tasks=today_tasks,
         today_success_rate=success_rate,
         today_cost_cny=total_cost,
         today_total_tokens=total_tokens,
         avg_elapsed_ms=avg_elapsed,
-        status_counts=_status_counts(payloads),
-        model_facets=_model_facets(payloads),
+        status_counts=status_counts,
+        model_facets=[
+            {"value": str(model_name), "count": int(count)}
+            for model_name, count in sorted(model_rows, key=lambda row: (-int(row[1]), str(row[0])))
+            if model_name
+        ],
     )
 
 
@@ -427,20 +465,27 @@ async def export_tasks(
     stage: str | None = Query(None),
     model: str | None = Query(None),
     time_range: str | None = Query(None),
+    since: str | None = Query(None),
     q: str | None = Query(None),
     sort: str = Query("started_at:desc"),
 ) -> Response:
-    payloads = _sort_payloads(
-        await _load_payloads(
-            s,
-            status=status,
-            stage=stage,
-            time_range=time_range,
-            q=q,
-            model=model,
-        ),
-        sort,
+    clauses = _task_filters(
+        status=status,
+        stage=stage,
+        time_range=time_range or since,
+        q=q,
+        model=model,
     )
+    task_ids = list(
+        (
+            await s.scalars(
+                select(Task.id)
+                .where(*clauses)
+                .order_by(*_task_sort_order(sort))
+            )
+        ).all()
+    )
+    payloads = await build_task_payloads(task_ids)
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["任务 ID", "状态", "阶段", "文章标题", "博主", "触发方式", "开始", "结束", "耗时(ms)", "tokens", "成本(¥)", "错误信息"])

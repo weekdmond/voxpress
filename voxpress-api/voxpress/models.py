@@ -326,6 +326,45 @@ class TaskStageRun(Base):
     )
 
 
+class SystemJobRun(Base):
+    __tablename__ = "system_job_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running','done','failed','skipped')",
+            name="ck_system_job_runs_status",
+        ),
+        CheckConstraint(
+            "trigger_kind IN ('scheduled','manual')",
+            name="ck_system_job_runs_trigger_kind",
+        ),
+        Index("idx_system_job_runs_status", "status", "started_at"),
+        Index("idx_system_job_runs_job_key", "job_key", "started_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    job_key: Mapped[str] = mapped_column(Text, nullable=False)
+    job_name: Mapped[str] = mapped_column(Text, nullable=False)
+    trigger_kind: Mapped[str] = mapped_column(Text, nullable=False, default="scheduled")
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="running")
+    scope: Mapped[str | None] = mapped_column(Text)
+    detail: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    total_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    processed_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    skipped_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 # ─── settings (single-row KV) ───────────────────────
 
 

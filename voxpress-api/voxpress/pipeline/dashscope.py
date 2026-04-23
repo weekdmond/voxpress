@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,9 +26,9 @@ from voxpress.task_metrics import llm_usage_from_dashscope, merge_usage
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_LLM_MODELS = ["qwen-plus", "qwen-plus-latest", "qwen-turbo", "qwen-flash"]
-DEFAULT_CORRECTOR_MODELS = ["qwen-turbo", "qwen-flash", "qwen-plus"]
-DEFAULT_ASR_MODELS = ["qwen3-asr-flash-filetrans"]
+DEFAULT_LLM_MODELS = settings.dashscope_llm_models_list
+DEFAULT_CORRECTOR_MODELS = settings.dashscope_corrector_models_list
+DEFAULT_ASR_MODELS = settings.dashscope_asr_models_list
 
 
 class DashScopeError(RuntimeError):
@@ -104,8 +105,8 @@ class DashScopeChatClient:
 
 
 class DashScopeLLM(LLMBackend):
-    def __init__(self, *, model: str = "qwen-plus") -> None:
-        self.model = model
+    def __init__(self, *, model: str | None = None) -> None:
+        self.model = model or settings.dashscope_default_llm_model
         self.client = DashScopeChatClient()
 
     async def organize(
@@ -115,46 +116,51 @@ class DashScopeLLM(LLMBackend):
         title_hint: str,
         creator_hint: str,
         prompt_template: str,
+        duration_sec: int | None = None,
     ) -> dict[str, Any]:
         system = prompt_template or DEFAULT_ORGANIZER_TEMPLATE
-        user = (
-            f"视频平台标题(参考用,不是最终标题):{title_hint}\n"
-            f"作者:{creator_hint}\n\n"
-            "【原始逐字稿】\n"
-            f"{transcript}\n\n"
-            "━━━━━━━━\n"
-            "请按系统指令整理成文章,严格以 JSON 返回下面字段:\n"
-            "{\n"
-            '  "title": "≤30 字。忠于作者实际讨论的内容,陈述式标题。不要问句、不要营销式。",\n'
-            '  "summary": "≤60 字,一句话概括作者的核心立场,保留作者语气强度与锋芒,不是中性摘要。",\n'
-            '  "content_md": "Markdown 正文。遵循系统指令里的原则、禁止项、结构规范。",\n'
-            '  "tags": ["2-4 个中文标签,具体到行业/话题/方法论,不要\'思考\'\'分享\'这种泛词"]'
-            "\n"
-            "}\n\n"
-            "只输出 JSON,不要任何解释或代码围栏。"
-        )
+        min_output_chars = _min_organized_chars(transcript, duration_sec=duration_sec)
         result = await self.client.chat_json_result(
             model=self.model,
             system=system,
-            user=user,
+            user=_organize_user_prompt(
+                transcript=transcript,
+                title_hint=title_hint,
+                creator_hint=creator_hint,
+                min_output_chars=min_output_chars,
+                duration_sec=duration_sec,
+            ),
             temperature=0.3,
             timeout_sec=600.0,
         )
-        data = result.data
-        title = (data.get("title") or title_hint).strip()
-        summary = (data.get("summary") or "").strip()
-        content_md = (data.get("content_md") or "").strip()
-        tags = data.get("tags") or []
-        if not isinstance(tags, list):
-            tags = []
-        return {
-            "title": title,
-            "summary": summary,
-            "content_md": content_md or f"# {title}\n\n> {summary}",
-            "tags": [str(tag)[:16] for tag in tags[:4]],
-            "_usage": result.usage,
-            "_primary_model": self.model,
-        }
+        organized = _normalize_organized_payload(result.data, title_hint=title_hint)
+        usage = result.usage
+        if _is_overcompressed_article(
+            transcript=transcript,
+            content_md=organized["content_md"],
+            duration_sec=duration_sec,
+        ):
+            retry = await self.client.chat_json_result(
+                model=self.model,
+                system=system,
+                user=_organize_user_prompt(
+                    transcript=transcript,
+                    title_hint=title_hint,
+                    creator_hint=creator_hint,
+                    min_output_chars=min_output_chars,
+                    duration_sec=duration_sec,
+                    retry=True,
+                ),
+                temperature=0.2,
+                timeout_sec=600.0,
+            )
+            usage = merge_usage(usage, retry.usage)
+            retry_organized = _normalize_organized_payload(retry.data, title_hint=title_hint)
+            if _organized_score(retry_organized["content_md"]) >= _organized_score(organized["content_md"]):
+                organized = retry_organized
+        organized["_usage"] = usage
+        organized["_primary_model"] = self.model
+        return organized
 
     async def annotate_background(
         self,
@@ -247,8 +253,8 @@ class DashScopeCorrector:
 
 
 class DashScopeFileTranscriber(Transcriber):
-    def __init__(self, *, model: str = "qwen3-asr-flash-filetrans") -> None:
-        self.model = model
+    def __init__(self, *, model: str | None = None) -> None:
+        self.model = model or settings.dashscope_default_asr_model
         self.api_key = (settings.dashscope_api_key or "").strip()
         self.api_base_url = settings.dashscope_api_base_url.rstrip("/")
         if not self.api_key:
@@ -446,6 +452,105 @@ def _looks_like_meta_context(text: str) -> bool:
     )
     score = sum(1 for marker in markers if marker in lowered)
     return score >= 2
+
+
+def _visible_text_len(text: str) -> int:
+    if not text:
+        return 0
+    normalized = re.sub(r"[#>*`_\-\n\r\t ]+", "", text)
+    return len(normalized)
+
+
+def _min_organized_chars(transcript: str, *, duration_sec: int | None = None) -> int:
+    transcript_len = _visible_text_len(transcript)
+    if duration_sec and duration_sec >= 3600:
+        ratio = 0.18
+        floor = 3200
+    elif duration_sec and duration_sec >= 1800:
+        ratio = 0.16
+        floor = 2400
+    elif duration_sec and duration_sec >= 600:
+        ratio = 0.14
+        floor = 1600
+    else:
+        ratio = 0.12
+        floor = 900
+    return max(floor, int(transcript_len * ratio))
+
+
+def _is_overcompressed_article(
+    *,
+    transcript: str,
+    content_md: str,
+    duration_sec: int | None = None,
+) -> bool:
+    content_len = _visible_text_len(content_md)
+    min_required = _min_organized_chars(transcript, duration_sec=duration_sec)
+    return content_len < min_required
+
+
+def _organized_score(content_md: str) -> tuple[int, int]:
+    content_len = _visible_text_len(content_md)
+    section_count = content_md.count("\n## ")
+    return (content_len, section_count)
+
+
+def _organize_user_prompt(
+    *,
+    transcript: str,
+    title_hint: str,
+    creator_hint: str,
+    min_output_chars: int,
+    duration_sec: int | None,
+    retry: bool = False,
+) -> str:
+    duration_line = ""
+    if duration_sec:
+        minutes = max(1, round(duration_sec / 60))
+        duration_line = f"视频时长约:{minutes} 分钟\n"
+    retry_line = ""
+    if retry:
+        retry_line = (
+            "上一次输出被判定为压缩过头: 只保留了主干,丢失了不少论据、例子和推导。\n"
+            "这一次请显著写长,补回关键例证、展开过程和作者的重要原话,不要再输出摘要稿。\n"
+        )
+    return (
+        f"视频平台标题(参考用,不是最终标题):{title_hint}\n"
+        f"作者:{creator_hint}\n"
+        f"{duration_line}"
+        f"逐字稿长度(去空白后):约 {_visible_text_len(transcript)} 字\n"
+        f"正文目标:至少写到 {min_output_chars} 字,这不是摘要任务,而是保留原观点和原内容的整理稿。\n"
+        "必须保留作者的重要论点、论据、案例、反问、结论;允许适度润色,但不要改变作者原意。\n"
+        "如果原文是长直播/长表达,请写成完整长文,不要只保留观点骨架。\n"
+        f"{retry_line}\n"
+        "【原始逐字稿】\n"
+        f"{transcript}\n\n"
+        "━━━━━━━━\n"
+        "请按系统指令整理成文章,严格以 JSON 返回下面字段:\n"
+        "{\n"
+        '  "title": "≤30 字。忠于作者实际讨论的内容,陈述式标题。不要问句、不要营销式。",\n'
+        '  "summary": "≤60 字,一句话概括作者的核心立场,保留作者语气强度与锋芒,不是中性摘要。",\n'
+        '  "content_md": "Markdown 正文。遵循系统指令里的原则、禁止项、结构规范。",\n'
+        '  "tags": ["2-4 个中文标签,具体到行业/话题/方法论,不要\'思考\'\'分享\'这种泛词"]'
+        "\n"
+        "}\n\n"
+        "只输出 JSON,不要任何解释或代码围栏。"
+    )
+
+
+def _normalize_organized_payload(data: dict[str, Any], *, title_hint: str) -> dict[str, Any]:
+    title = (data.get("title") or title_hint).strip()
+    summary = (data.get("summary") or "").strip()
+    content_md = (data.get("content_md") or "").strip()
+    tags = data.get("tags") or []
+    if not isinstance(tags, list):
+        tags = []
+    return {
+        "title": title,
+        "summary": summary,
+        "content_md": content_md or f"# {title}\n\n> {summary}",
+        "tags": [str(tag)[:16] for tag in tags[:4]],
+    }
 
 
 def _raise_dashscope_http_error(response: httpx.Response, *, prefix: str) -> None:

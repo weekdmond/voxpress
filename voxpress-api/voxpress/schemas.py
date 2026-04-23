@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from voxpress.config import settings as app_settings
+
 # ─── Shared ─────────────────────────────────────────
 
 T = TypeVar("T")
@@ -38,6 +40,7 @@ class CreatorOut(BaseModel):
 
     id: int
     platform: Platform
+    external_id: str
     handle: str
     name: str
     initial: str = ""
@@ -57,6 +60,7 @@ class CreatorOut(BaseModel):
         return cls(
             id=c.id,
             platform=c.platform,  # type: ignore[arg-type]
+            external_id=c.external_id,
             handle=c.handle,
             name=c.name,
             initial=first_grapheme(c.name),
@@ -121,6 +125,12 @@ class VideoOut(BaseModel):
         )
 
 
+class VideoSummaryOut(BaseModel):
+    total: int
+    organized: int
+    pending: int
+
+
 # ─── Article ────────────────────────────────────────
 
 
@@ -139,6 +149,8 @@ class ArticleOut(BaseModel):
     tags: list[str]
     background_notes: dict[str, Any] | None = None
     likes_snapshot: int
+    duration_sec: int = 0
+    cost_cny: float = 0
     published_at: datetime
     created_at: datetime
     updated_at: datetime
@@ -178,8 +190,16 @@ class ArticlePatch(BaseModel):
     content_md: str | None = None
 
 
+RebuildStage = Literal["download", "transcribe", "correct", "organize"]
+
+
 class ArticleBatchIn(BaseModel):
     article_ids: list[UUID] = Field(min_length=1, max_length=200)
+    from_stage: RebuildStage | None = None
+
+
+class ArticleRebuildIn(BaseModel):
+    from_stage: RebuildStage | None = None
 
 
 class ArticleBatchOut(BaseModel):
@@ -195,6 +215,7 @@ class ArticleBatchOut(BaseModel):
 TaskStage = Literal["download", "transcribe", "correct", "organize", "save"]
 TaskStatus = Literal["queued", "running", "done", "failed", "canceled"]
 TaskTriggerKind = Literal["manual", "batch", "rerun"]
+SystemJobStatus = Literal["running", "done", "failed", "skipped"]
 
 
 class TaskOut(BaseModel):
@@ -293,6 +314,36 @@ class TaskCreateIn(BaseModel):
     url: str = Field(min_length=1)
 
 
+class SystemJobRunOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    job_key: str
+    job_name: str
+    trigger_kind: Literal["scheduled", "manual"] = "scheduled"
+    status: SystemJobStatus
+    scope: str | None = None
+    detail: str | None = None
+    error: str | None = None
+    total_items: int = 0
+    processed_items: int = 0
+    failed_items: int = 0
+    skipped_items: int = 0
+    duration_ms: int | None = None
+    started_at: datetime
+    updated_at: datetime
+    finished_at: datetime | None = None
+
+
+class SystemJobSummaryOut(BaseModel):
+    today_runs: int
+    today_success_rate: float
+    today_processed_items: int
+    today_failed_items: int
+    avg_duration_ms: int
+    status_counts: dict[str, int]
+
+
 class ResolveIn(BaseModel):
     url: str = Field(min_length=1)
 
@@ -308,19 +359,19 @@ class TaskBatchIn(BaseModel):
 
 class LlmSettings(BaseModel):
     backend: Literal["dashscope"] = "dashscope"
-    model: str = "qwen-plus"
+    model: str = Field(default_factory=lambda: app_settings.dashscope_default_llm_model)
     concurrency: int = Field(default=4, ge=1, le=20)
 
 
 class WhisperSettings(BaseModel):
-    model: Literal["qwen3-asr-flash-filetrans"] = "qwen3-asr-flash-filetrans"
+    model: str = Field(default_factory=lambda: app_settings.dashscope_default_asr_model)
     language: Literal["zh", "auto"] = "zh"
     enable_initial_prompt: bool = True
 
 
 class CorrectorSettings(BaseModel):
     enabled: bool = True
-    model: str = "qwen-turbo"
+    model: str = Field(default_factory=lambda: app_settings.dashscope_default_corrector_model)
     template: str = ""
 
 

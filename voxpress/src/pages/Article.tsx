@@ -1,4 +1,13 @@
 import { useState } from 'react';
+
+type RebuildStage = 'auto' | 'download' | 'transcribe' | 'correct' | 'organize';
+const REBUILD_STAGE_OPTIONS: { v: RebuildStage; label: string }[] = [
+  { v: 'auto', label: '自动' },
+  { v: 'download', label: '从下载' },
+  { v: 'transcribe', label: '从转写' },
+  { v: 'correct', label: '从校对' },
+  { v: 'organize', label: '从整理' },
+];
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -20,6 +29,7 @@ import type { ArticleDetail } from '@/types/api';
 export function ArticlePage() {
   const { id = '' } = useParams<{ id: string }>();
   const [split, setSplit] = useState(true);
+  const [fromStage, setFromStage] = useState<RebuildStage>('auto');
 
   const { data, isLoading } = useQuery({
     queryKey: ['article', id],
@@ -27,7 +37,11 @@ export function ArticlePage() {
   });
 
   const rebuild = useMutation({
-    mutationFn: () => api.post<{ task_id: string }>(`/api/articles/${id}/rebuild`),
+    mutationFn: (stage: RebuildStage) =>
+      api.post<{ task_id: string }>(
+        `/api/articles/${id}/rebuild`,
+        stage === 'auto' ? {} : { from_stage: stage },
+      ),
     onSuccess: () => toast.success('已加入重新整理队列'),
     onError: (err: Error) => toast.error(err.message || '重新整理失败'),
   });
@@ -94,10 +108,39 @@ export function ArticlePage() {
               <Button size="sm" variant={split ? 'primary' : 'default'} onClick={() => setSplit((v) => !v)} icon={<Icon name="swap" size={12} />}>
                 {split ? '隐藏原稿' : '显示原稿'}
               </Button>
+              <select
+                value={fromStage}
+                onChange={(e) => setFromStage(e.target.value as RebuildStage)}
+                disabled={rebuild.isPending}
+                aria-label="起始阶段"
+                style={{
+                  height: 26,
+                  padding: '0 22px 0 8px',
+                  borderRadius: 6,
+                  border: '1px solid var(--vp-border)',
+                  background: 'var(--vp-bg)',
+                  color: 'var(--vp-ink)',
+                  fontFamily: 'inherit',
+                  fontSize: 11.5,
+                  cursor: 'pointer',
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                  backgroundImage:
+                    "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path d='M2 4l3 3 3-3' stroke='%236b7280' stroke-width='1.2' fill='none' stroke-linecap='round'/></svg>\")",
+                  backgroundRepeat: 'no-repeat',
+                  backgroundPosition: 'right 6px center',
+                }}
+              >
+                {REBUILD_STAGE_OPTIONS.map((o) => (
+                  <option key={o.v} value={o.v}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
               <Button
                 size="sm"
                 onClick={() => {
-                  if (confirm('当前文章会被覆盖,确认重新整理?')) rebuild.mutate();
+                  if (confirm('当前文章会被覆盖,确认重新整理?')) rebuild.mutate(fromStage);
                 }}
                 icon={<Icon name="refresh" size={12} />}
               >

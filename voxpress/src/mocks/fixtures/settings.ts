@@ -3,7 +3,7 @@ import type { Settings } from '@/types/api';
 export const defaultSettings: Settings = {
   llm: {
     backend: 'dashscope',
-    model: 'qwen-plus',
+    model: 'qwen3.6-plus',
     concurrency: 4,
   },
   whisper: {
@@ -13,7 +13,7 @@ export const defaultSettings: Settings = {
   },
   corrector: {
     enabled: true,
-    model: 'qwen-turbo',
+    model: 'qwen-turbo-latest',
     template:
       '你是中文语音转写校对员，只修正明显的同音字和专有名词错误，不做润色。',
   },
@@ -37,7 +37,7 @@ export const defaultSettings: Settings = {
 };
 
 export const availableModels = {
-  llm: ['qwen-plus', 'qwen-plus-latest', 'qwen-turbo', 'qwen-flash'],
-  corrector: ['qwen-turbo', 'qwen-flash', 'qwen-plus'],
+  llm: ['qwen3.6-plus', 'qwen-plus', 'qwen-plus-latest', 'qwen-turbo', 'qwen-flash'],
+  corrector: ['qwen-turbo-latest', 'qwen-turbo', 'qwen-flash', 'qwen3.6-plus', 'qwen-plus'],
   transcribe: ['qwen3-asr-flash-filetrans'],
 };

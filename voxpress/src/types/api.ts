@@ -10,6 +10,7 @@ export interface Page<T> {
 export interface Creator {
   id: number;
   platform: Platform;
+  external_id?: string;
   handle: string;
   name: string;
   initial: string;
@@ -43,6 +44,12 @@ export interface Video {
   article_id: string | null;
 }
 
+export interface VideoSummary {
+  total: number;
+  organized: number;
+  pending: number;
+}
+
 export interface Article {
   id: string;
   video_id: string;
@@ -56,6 +63,8 @@ export interface Article {
   tags: string[];
   background_notes?: BackgroundNotes | null;
   likes_snapshot: number;
+  duration_sec?: number;
+  cost_cny?: number;
   published_at: ISO8601;
   created_at: ISO8601;
   updated_at: ISO8601;
@@ -67,6 +76,10 @@ export interface ArticleBatchResult {
   processed: number;
   task_ids: string[];
   missing_ids: string[];
+}
+
+export interface TaskBatchResult {
+  tasks: Task[];
 }
 
 export interface BackgroundAlias {
@@ -124,6 +137,7 @@ export interface ArticleDetail extends Article {
 export type TaskStage = 'download' | 'transcribe' | 'correct' | 'organize' | 'save';
 export type TaskStatus = 'queued' | 'running' | 'done' | 'failed' | 'canceled';
 export type TaskTriggerKind = 'manual' | 'batch' | 'rerun';
+export type SystemJobStatus = 'running' | 'done' | 'failed' | 'skipped';
 
 export interface Task {
   id: string;
@@ -195,6 +209,34 @@ export interface TaskSummary {
   model_facets: TaskFacetItem[];
 }
 
+export interface SystemJobRun {
+  id: string;
+  job_key: string;
+  job_name: string;
+  trigger_kind: 'scheduled' | 'manual';
+  status: SystemJobStatus;
+  scope: string | null;
+  detail: string | null;
+  error: string | null;
+  total_items: number;
+  processed_items: number;
+  failed_items: number;
+  skipped_items: number;
+  duration_ms: number | null;
+  started_at: ISO8601;
+  updated_at: ISO8601;
+  finished_at: ISO8601 | null;
+}
+
+export interface SystemJobSummary {
+  today_runs: number;
+  today_success_rate: number;
+  today_processed_items: number;
+  today_failed_items: number;
+  avg_duration_ms: number;
+  status_counts: Record<string, number>;
+}
+
 export interface TaskRerunResult {
   requested: number;
   processed: number;
@@ -215,7 +257,7 @@ export interface Settings {
     concurrency: number;
   };
   whisper: {
-    model: 'qwen3-asr-flash-filetrans';
+    model: string;
     language: 'zh' | 'auto';
     enable_initial_prompt: boolean;
   };

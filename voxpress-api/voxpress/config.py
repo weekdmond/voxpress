@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -23,6 +24,17 @@ class Settings(BaseSettings):
     llm_base_url: str = "http://localhost:11434"
     dashscope_api_key: str | None = None
     dashscope_compatible_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    dashscope_default_llm_model: str = "qwen3.6-plus"
+    dashscope_default_corrector_model: str = "qwen-turbo"
+    dashscope_default_asr_model: str = "qwen3-asr-flash-filetrans"
+    dashscope_llm_models: str = "qwen3.6-plus,qwen-plus,qwen-plus-latest,qwen-turbo,qwen-flash"
+    dashscope_corrector_models: str = "qwen-turbo,qwen-flash,qwen3.6-plus,qwen-plus"
+    dashscope_asr_models: str = "qwen3-asr-flash-filetrans"
+    dashscope_chat_pricing: str = (
+        '{"qwen3.6-plus":[0.0020,0.0120],"qwen3.6-plus-2026-04-02":[0.0020,0.0120],'
+        '"qwen-plus":[0.0008,0.0020],"qwen-plus-latest":[0.0008,0.0020],"qwen-turbo":[0.0003,0.0006]}'
+    )
+    dashscope_asr_pricing: str = '{"qwen3-asr-flash-filetrans":0.00022}'
     dashscope_asr_poll_interval_sec: int = Field(default=2, ge=1, le=30)
     dashscope_asr_timeout_sec: int = Field(default=1800, ge=30, le=86_400)
     audio_dir: Path = Path("/tmp/voxpress/audio")
@@ -69,6 +81,71 @@ class Settings(BaseSettings):
         if "/compatible-mode/" in base:
             return base.replace("/compatible-mode/", "/api/", 1)
         return f"{base}/api/v1"
+
+    @staticmethod
+    def _split_csv(value: str) -> list[str]:
+        seen: set[str] = set()
+        items: list[str] = []
+        for raw in value.split(","):
+            item = raw.strip()
+            if not item or item in seen:
+                continue
+            seen.add(item)
+            items.append(item)
+        return items
+
+    @property
+    def dashscope_llm_models_list(self) -> list[str]:
+        items = self._split_csv(self.dashscope_llm_models)
+        return items or [self.dashscope_default_llm_model]
+
+    @property
+    def dashscope_corrector_models_list(self) -> list[str]:
+        items = self._split_csv(self.dashscope_corrector_models)
+        default = self.dashscope_default_corrector_model or self.dashscope_default_llm_model
+        return items or [default]
+
+    @property
+    def dashscope_asr_models_list(self) -> list[str]:
+        items = self._split_csv(self.dashscope_asr_models)
+        return items or [self.dashscope_default_asr_model]
+
+    @staticmethod
+    def _parse_json_mapping(raw: str) -> dict:
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    @property
+    def dashscope_chat_pricing_map(self) -> dict[str, tuple[float, float]]:
+        parsed = self._parse_json_mapping(self.dashscope_chat_pricing)
+        out: dict[str, tuple[float, float]] = {}
+        for model, value in parsed.items():
+            if (
+                isinstance(model, str)
+                and isinstance(value, (list, tuple))
+                and len(value) == 2
+            ):
+                try:
+                    out[model] = (float(value[0]), float(value[1]))
+                except (TypeError, ValueError):
+                    continue
+        return out
+
+    @property
+    def dashscope_asr_pricing_map(self) -> dict[str, float]:
+        parsed = self._parse_json_mapping(self.dashscope_asr_pricing)
+        out: dict[str, float] = {}
+        for model, value in parsed.items():
+            if not isinstance(model, str):
+                continue
+            try:
+                out[model] = float(value)
+            except (TypeError, ValueError):
+                continue
+        return out
 
 
 settings = Settings()

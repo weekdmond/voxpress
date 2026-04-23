@@ -29,22 +29,30 @@ async def list_creators(
     sort: str = Query("followers:desc"),
     q: str | None = None,
     verified: int | None = None,
+    page: int = Query(1, ge=1),
+    limit: int = Query(1000, ge=1, le=1000),
+    offset: int | None = Query(None, ge=0),
     cursor: str | None = None,  # noqa: ARG001  (cursor reserved for future keyset pagination)
 ) -> Page[CreatorOut]:
     stmt = _creator_list_stmt()
+    total_stmt = select(func.count()).select_from(Creator)
     if q:
         like = f"%{q}%"
-        stmt = stmt.where(
-            Creator.name.ilike(like) | Creator.handle.ilike(like) | Creator.bio.ilike(like)
-        )
+        predicate = Creator.name.ilike(like) | Creator.handle.ilike(like) | Creator.bio.ilike(like)
+        stmt = stmt.where(predicate)
+        total_stmt = total_stmt.where(predicate)
     if verified == 1:
-        stmt = stmt.where(Creator.verified.is_(True))
+        predicate = Creator.verified.is_(True)
+        stmt = stmt.where(predicate)
+        total_stmt = total_stmt.where(predicate)
     if sort == "followers:desc":
         stmt = stmt.order_by(Creator.followers.desc())
+    resolved_offset = offset if offset is not None else max(0, (page - 1) * limit)
+    stmt = stmt.offset(resolved_offset).limit(limit)
 
     rows = (await s.execute(stmt)).all()
     items = [CreatorOut.from_model(c, article_count=int(count)) for c, count in rows]
-    total = await s.scalar(select(func.count()).select_from(Creator))
+    total = await s.scalar(total_stmt)
     return Page(items=items, cursor=None, total=total or 0)
 
 

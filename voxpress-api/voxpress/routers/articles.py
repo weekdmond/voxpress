@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +19,7 @@ from voxpress.schemas import (
     ArticleDetailOut,
     ArticleOut,
     ArticlePatch,
+    ArticleRebuildIn,
     ArticleSource,
     Page,
     TranscriptSegmentOut,
@@ -35,7 +36,7 @@ async def list_articles(
     tag: str | None = None,
     since: str | None = None,
     limit: int = Query(50, ge=1, le=200),
-    cursor: str | None = None,  # noqa: ARG001
+    offset: int = Query(0, ge=0),
 ) -> Page[ArticleOut]:
     stmt = select(Article)
     total_stmt = select(func.count()).select_from(Article)
@@ -61,20 +62,35 @@ async def list_articles(
             predicate = Article.published_at >= datetime.now(tz=timezone.utc) - timedelta(days=days)
             stmt = stmt.where(predicate)
             total_stmt = total_stmt.where(predicate)
-    stmt = stmt.order_by(Article.published_at.desc()).limit(limit)
+    stmt = stmt.order_by(Article.published_at.desc(), Article.id.desc()).offset(offset).limit(limit)
 
     items = (await s.scalars(stmt)).all()
-    videos = (
-        await s.scalars(select(Video).where(Video.id.in_([article.video_id for article in items])))
-        if items
-        else []
-    )
+    video_ids = [article.video_id for article in items]
+    article_ids = [article.id for article in items]
+    if items:
+        videos = (await s.scalars(select(Video).where(Video.id.in_(video_ids)))).all()
+        cost_rows = (
+            await s.execute(
+                select(Task.article_id, Task.cost_cny)
+                .where(Task.article_id.in_(article_ids), Task.status == "done")
+                .order_by(Task.article_id, Task.finished_at.desc().nulls_last())
+                .distinct(Task.article_id)
+            )
+        ).all()
+    else:
+        videos = []
+        cost_rows = []
     video_map = {video.id: video for video in videos}
+    cost_map = {aid: float(cost or 0) for aid, cost in cost_rows}
     total = await s.scalar(total_stmt)
     return Page(
         items=[
             ArticleOut.model_validate(a).model_copy(
-                update={"cover_url": video_map.get(a.video_id).cover_url if video_map.get(a.video_id) else None}
+                update={
+                    "cover_url": video_map[a.video_id].cover_url if a.video_id in video_map else None,
+                    "duration_sec": video_map[a.video_id].duration_sec if a.video_id in video_map else 0,
+                    "cost_cny": cost_map.get(a.id, 0.0),
+                }
             )
             for a in items
         ],
@@ -175,6 +191,60 @@ async def delete_article(article_id: UUID, s: AsyncSession = Depends(get_session
     return Response(status_code=204)
 
 
+@router.post("/batch", response_model=ArticleBatchOut, deprecated=True)
+async def create_articles_batch_compat(
+    payload: dict,
+    s: AsyncSession = Depends(get_session),
+) -> ArticleBatchOut:
+    """Backward-compatible video processing entrypoint.
+
+    Older frontend code still posts selected `video_ids` to `/api/articles/batch`.
+    The canonical route is now `/api/tasks/batch`, but keeping this alias avoids
+    405s for stale clients and local cached bundles.
+    """
+    from voxpress.task_store import emit_task_create
+
+    video_ids = list(payload.get("video_ids") or [])
+    creator_id = payload.get("creator_id")
+    rows_stmt = select(Video).where(Video.id.in_(video_ids))
+    if creator_id is not None:
+        rows_stmt = rows_stmt.where(Video.creator_id == creator_id)
+    rows = (await s.scalars(rows_stmt)).all()
+    video_map = {video.id: video for video in rows}
+    task_ids: list[UUID] = []
+
+    for video_id in video_ids:
+        video = video_map.get(video_id)
+        if not video:
+            continue
+        task = Task(
+            source_url=video.source_url,
+            title_guess=video.title,
+            creator_id=video.creator_id,
+            video_id=video.id,
+            trigger_kind="batch",
+            stage="download",
+            progress=0,
+            detail="等待调度",
+        )
+        s.add(task)
+        await s.flush()
+        task_ids.append(task.id)
+
+    await s.commit()
+    for task_id in task_ids:
+        await emit_task_create(task_id)
+
+    missing_ids = [video_id for video_id in video_ids if video_id not in video_map]
+    return ArticleBatchOut(
+        requested=len(video_ids),
+        matched=len(video_map),
+        processed=len(task_ids),
+        task_ids=task_ids,
+        missing_ids=missing_ids,
+    )
+
+
 @router.post("/batch/rebuild", response_model=ArticleBatchOut)
 async def rebuild_articles_batch(
     payload: ArticleBatchIn,
@@ -201,10 +271,7 @@ async def rebuild_articles_batch(
             video_id=video.id,
             trigger_kind="rerun",
             rerun_of_task_id=None,
-            resume_from_stage="organize",
-            stage="organize",
-            progress=72,
-            detail="等待重跑 · 从整理开始",
+            **(await _rebuild_start_kwargs(s, video, payload.from_stage)),
         )
         s.add(task)
         await s.flush()
@@ -248,7 +315,11 @@ async def delete_articles_batch(
 
 
 @router.post("/{article_id}/rebuild")
-async def rebuild_article(article_id: UUID, s: AsyncSession = Depends(get_session)) -> dict:
+async def rebuild_article(
+    article_id: UUID,
+    payload: ArticleRebuildIn = Body(default_factory=ArticleRebuildIn),
+    s: AsyncSession = Depends(get_session),
+) -> dict:
     from voxpress.task_store import emit_task_create
 
     art = await s.get(Article, article_id)
@@ -257,6 +328,7 @@ async def rebuild_article(article_id: UUID, s: AsyncSession = Depends(get_sessio
     video = await s.get(Video, art.video_id)
     if not video:
         raise NotFound("source video missing")
+    requested_stage = payload.from_stage
     task = Task(
         source_url=video.source_url,
         title_guess=art.title,
@@ -264,16 +336,65 @@ async def rebuild_article(article_id: UUID, s: AsyncSession = Depends(get_sessio
         video_id=video.id,
         trigger_kind="rerun",
         rerun_of_task_id=None,
-        resume_from_stage="organize",
-        stage="organize",
-        progress=72,
-        detail="等待重跑 · 从整理开始",
+        **(await _rebuild_start_kwargs(s, video, requested_stage)),
     )
     s.add(task)
     await s.commit()
     await s.refresh(task)
     await emit_task_create(task.id)
     return {"task_id": str(task.id)}
+
+
+_REBUILD_STAGE_ORDER = ("download", "transcribe", "correct", "organize")
+_REBUILD_STAGE_PROGRESS = {"download": 0, "transcribe": 20, "correct": 58, "organize": 72}
+_REBUILD_STAGE_LABEL = {
+    "download": "下载",
+    "transcribe": "转写",
+    "correct": "校对",
+    "organize": "整理",
+}
+
+
+async def _rebuild_start_kwargs(
+    s: AsyncSession,
+    video: Video,
+    requested: str | None = None,
+) -> dict[str, object]:
+    """Pick the starting stage for a rebuild, honoring the user's request when possible.
+
+    - requested=None → auto: 有缓存从 transcribe,没缓存从 download
+    - requested 明确给定 → 用它;若前置素材缺失,回退到最早能跑的阶段
+    - 回退规则:organize/correct 需要已有 transcript.raw_text,transcribe 需要已缓存音视频
+    整理质量依赖转写质量,所以 auto 仍然从 transcribe 起,而不是 organize。
+    """
+    has_media = bool(video.audio_object_key or video.media_object_key)
+    transcript = await s.get(Transcript, video.id)
+    has_raw = bool(transcript and transcript.raw_text)
+
+    auto_stage = "transcribe" if has_media else "download"
+    stage = requested if requested in _REBUILD_STAGE_ORDER else auto_stage
+
+    if stage in {"organize", "correct"} and not has_raw:
+        stage = auto_stage
+    elif stage == "transcribe" and not has_media:
+        stage = "download"
+
+    fell_back = requested in _REBUILD_STAGE_ORDER and stage != requested
+    base_detail = {
+        "download": "等待重跑 · 从下载开始",
+        "transcribe": "等待重跑 · 从转写开始(复用已缓存音视频)",
+        "correct": "等待重跑 · 从校对开始(复用已有转写)",
+        "organize": "等待重跑 · 从整理开始(复用已有转写)",
+    }[stage]
+    if fell_back:
+        base_detail = f"{base_detail} · 回退自{_REBUILD_STAGE_LABEL[requested]}(素材不足)"
+
+    return {
+        "resume_from_stage": None if stage == "download" else stage,
+        "stage": stage,
+        "progress": _REBUILD_STAGE_PROGRESS[stage],
+        "detail": base_detail,
+    }
 
 
 @router.get("/{article_id}/export.md")

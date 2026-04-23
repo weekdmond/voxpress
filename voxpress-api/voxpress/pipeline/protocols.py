@@ -73,6 +73,7 @@ class LLMBackend(Protocol):
         title_hint: str,
         creator_hint: str,
         prompt_template: str,
+        duration_sec: int | None = None,
     ) -> dict: ...  # {title, summary, content_md, tags}
 
     async def annotate_background(

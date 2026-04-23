@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from voxpress.config import settings as app_settings
 from voxpress.db import get_session
 from voxpress.errors import CookieInvalid, CookieMissing, InvalidCookieFile
 from voxpress.creator_sync import fetch_creator_page
@@ -175,6 +176,8 @@ def _normalize_settings_dict(data: dict) -> dict:
     llm_model = str(llm.get("model") or "").strip()
     if not llm_model or ":" in llm_model:
         llm["model"] = _DEFAULTS.llm.model
+    elif llm_model not in app_settings.dashscope_llm_models_list:
+        llm["model"] = app_settings.dashscope_default_llm_model
     normalized["llm"] = llm
 
     whisper = {**_DEFAULTS.whisper.model_dump(), **dict(normalized.get("whisper") or {})}
@@ -189,6 +192,8 @@ def _normalize_settings_dict(data: dict) -> dict:
     corrector_model = str(corrector.get("model") or "").strip()
     if not corrector_model or ":" in corrector_model:
         corrector["model"] = _DEFAULTS.corrector.model
+    elif corrector_model not in DEFAULT_CORRECTOR_MODELS:
+        corrector["model"] = app_settings.dashscope_default_corrector_model
     normalized["corrector"] = corrector
 
     article = {**_DEFAULTS.article.model_dump(), **dict(normalized.get("article") or {})}

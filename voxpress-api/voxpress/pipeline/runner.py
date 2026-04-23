@@ -35,21 +35,21 @@ def _normalize_runtime_settings(key: str, value: dict | None) -> dict:
     if key == "llm":
         model = str(raw.get("model") or "").strip()
         raw["backend"] = "dashscope"
-        if not model or ":" in model:
-            raw["model"] = "qwen-plus"
+        if not model or ":" in model or model not in app_settings.dashscope_llm_models_list:
+            raw["model"] = app_settings.dashscope_default_llm_model
         return raw
     if key == "whisper":
         model = str(raw.get("model") or "").strip()
-        if model != "qwen3-asr-flash-filetrans":
-            raw["model"] = "qwen3-asr-flash-filetrans"
+        if model not in app_settings.dashscope_asr_models_list:
+            raw["model"] = app_settings.dashscope_default_asr_model
         language = str(raw.get("language") or "zh")
         raw["language"] = language if language in {"zh", "auto"} else "zh"
         raw["enable_initial_prompt"] = bool(raw.get("enable_initial_prompt", True))
         return raw
     if key == "corrector":
         model = str(raw.get("model") or "").strip()
-        if not model or ":" in model:
-            raw["model"] = "qwen-turbo"
+        if not model or ":" in model or model not in app_settings.dashscope_corrector_models_list:
+            raw["model"] = app_settings.dashscope_default_corrector_model
         return raw
     return raw
 
@@ -88,7 +88,7 @@ class TaskRunner:
         from voxpress.pipeline.dashscope import DashScopeFileTranscriber
 
         whisper_row = await self._load_settings_entry("whisper")
-        whisper_model = (whisper_row or {}).get("model", "qwen3-asr-flash-filetrans")
+        whisper_model = (whisper_row or {}).get("model", app_settings.dashscope_default_asr_model)
         return DashScopeFileTranscriber(model=whisper_model)
 
     async def _llm_backend(self) -> LLMBackend:
@@ -97,23 +97,26 @@ class TaskRunner:
         from voxpress.pipeline.dashscope import DashScopeLLM
 
         llm_row = await self._load_settings_entry("llm")
-        llm_model = (llm_row or {}).get("model", "qwen-plus")
+        llm_model = (llm_row or {}).get("model", app_settings.dashscope_default_llm_model)
         return DashScopeLLM(model=llm_model)
 
     async def _corrector_backend(self) -> DashScopeCorrector:
         llm_row = await self._load_settings_entry("llm")
         corrector_row = await self._load_settings_entry("corrector")
-        model = str((corrector_row or {}).get("model") or (llm_row or {}).get("model", "qwen-turbo"))
+        model = str(
+            (corrector_row or {}).get("model")
+            or (llm_row or {}).get("model", app_settings.dashscope_default_corrector_model)
+        )
         template = str((corrector_row or {}).get("template") or "")
         return DashScopeCorrector(model=model, template=template)
 
     async def current_whisper_label(self) -> str:
         whisper_row = await self._load_settings_entry("whisper")
-        return f"DashScope {(whisper_row or {}).get('model', 'qwen3-asr-flash-filetrans')}"
+        return f"DashScope {(whisper_row or {}).get('model', app_settings.dashscope_default_asr_model)}"
 
     async def current_whisper_model(self) -> str:
         whisper_row = await self._load_settings_entry("whisper")
-        return str((whisper_row or {}).get("model", "qwen3-asr-flash-filetrans"))
+        return str((whisper_row or {}).get("model", app_settings.dashscope_default_asr_model))
 
     async def current_whisper_language(self) -> str:
         whisper_row = await self._load_settings_entry("whisper")
@@ -125,22 +128,27 @@ class TaskRunner:
 
     async def current_llm_label(self) -> str:
         llm_row = await self._load_settings_entry("llm")
-        return f"DashScope {(llm_row or {}).get('model', 'qwen-plus')}"
+        return f"DashScope {(llm_row or {}).get('model', app_settings.dashscope_default_llm_model)}"
 
     async def current_llm_model(self) -> str:
         llm_row = await self._load_settings_entry("llm")
-        return str((llm_row or {}).get("model", "qwen-plus"))
+        return str((llm_row or {}).get("model", app_settings.dashscope_default_llm_model))
 
     async def current_corrector_label(self) -> str:
         corrector_row = await self._load_settings_entry("corrector")
         llm_row = await self._load_settings_entry("llm")
-        model = (corrector_row or {}).get("model") or (llm_row or {}).get("model", "qwen-turbo")
+        model = (corrector_row or {}).get("model") or (
+            llm_row or {}
+        ).get("model", app_settings.dashscope_default_corrector_model)
         return f"DashScope {model} · 纠错"
 
     async def current_corrector_model(self) -> str:
         corrector_row = await self._load_settings_entry("corrector")
         llm_row = await self._load_settings_entry("llm")
-        return str((corrector_row or {}).get("model") or (llm_row or {}).get("model", "qwen-turbo"))
+        return str(
+            (corrector_row or {}).get("model")
+            or (llm_row or {}).get("model", app_settings.dashscope_default_corrector_model)
+        )
 
     async def auto_correct_enabled(self) -> bool:
         corrector_row = await self._load_settings_entry("corrector")
@@ -328,6 +336,7 @@ class TaskRunner:
             title_hint=ctx.video.title,
             creator_hint=ctx.creator.name,
             prompt_template=prompt_template,
+            duration_sec=ctx.video.duration_sec,
         )
         usage = organized.get("_usage")
         if await self.background_notes_enabled():

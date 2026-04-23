@@ -12,6 +12,9 @@ import { formatDuration, formatRelative } from '@/lib/format';
 import { subscribeTasks } from '@/lib/sse';
 import type {
   Page as ApiPage,
+  SystemJobRun,
+  SystemJobStatus,
+  SystemJobSummary,
   Task,
   TaskCancelResult,
   TaskRerunResult,
@@ -20,12 +23,25 @@ import type {
 } from '@/types/api';
 import s from './Tasks.module.css';
 
-const STATUS_TABS: { key: string; label: string }[] = [
+const SCOPE_TABS: { key: 'content' | 'system'; label: string }[] = [
+  { key: 'content', label: '内容任务' },
+  { key: 'system', label: '系统任务' },
+];
+
+const CONTENT_STATUS_TABS: { key: string; label: string }[] = [
   { key: 'all', label: '全部' },
   { key: 'running', label: '运行中' },
   { key: 'queued', label: '排队' },
   { key: 'done', label: '成功' },
   { key: 'failed', label: '失败' },
+];
+
+const SYSTEM_STATUS_TABS: { key: string; label: string }[] = [
+  { key: 'all', label: '全部' },
+  { key: 'running', label: '运行中' },
+  { key: 'done', label: '成功' },
+  { key: 'failed', label: '失败' },
+  { key: 'skipped', label: '跳过' },
 ];
 
 const TIME_OPTIONS = [
@@ -69,12 +85,19 @@ function labelFromTitle(t: string): string {
   return m ? m[0] : 'VP';
 }
 
-function statusDot(status: TaskStatus): string {
+function statusDot(status: TaskStatus | SystemJobStatus): string {
   if (status === 'done') return s.stDotDone;
   if (status === 'running') return s.stDotRunning;
   if (status === 'failed') return s.stDotFailed;
   if (status === 'queued') return s.stDotQueued;
   return s.stDotCanceled;
+}
+
+function systemStageLabel(status: SystemJobStatus): string {
+  if (status === 'done') return 'COMPLETED';
+  if (status === 'running') return 'RUNNING';
+  if (status === 'failed') return 'FAILED';
+  return 'SKIPPED';
 }
 
 interface DropdownProps {
@@ -130,6 +153,8 @@ export function TasksPage() {
   const [sp, setSp] = useSearchParams();
   const qc = useQueryClient();
 
+  const scope = sp.get('scope') === 'system' ? 'system' : 'content';
+  const isSystem = scope === 'system';
   const tab = sp.get('tab') || 'all';
   const model = sp.get('model') || 'all';
   const stage = sp.get('stage') || 'all';
@@ -154,9 +179,19 @@ export function TasksPage() {
     queryKey: ['tasks', 'summary'],
     queryFn: () => api.get<TaskSummary>('/api/tasks/summary'),
     refetchInterval: 60_000,
+    enabled: !isSystem,
   });
   const statusCounts = summary?.status_counts ?? {};
   const totalCount = Object.values(statusCounts).reduce((a, b) => a + b, 0);
+
+  const { data: systemSummary } = useQuery({
+    queryKey: ['system-jobs', 'summary'],
+    queryFn: () => api.get<SystemJobSummary>('/api/system-jobs/summary'),
+    refetchInterval: 60_000,
+    enabled: isSystem,
+  });
+  const systemStatusCounts = systemSummary?.status_counts ?? {};
+  const systemTotalCount = Object.values(systemStatusCounts).reduce((a, b) => a + b, 0);
 
   // ─── List ────────────────────────────────────────
   const listParams = useMemo(() => {
@@ -174,13 +209,35 @@ export function TasksPage() {
   const { data: listPage } = useQuery({
     queryKey: ['tasks', 'list', listParams],
     queryFn: () => api.get<ApiPage<Task>>(`/api/tasks?${listParams}`),
+    enabled: !isSystem,
   });
   const tasks = listPage?.items ?? [];
   const listTotal = listPage?.total ?? tasks.length;
   const totalPages = Math.max(1, Math.ceil(listTotal / PAGE_SIZE));
 
+  const systemParams = useMemo(() => {
+    const p = new URLSearchParams();
+    if (tab !== 'all') p.set('status', tab);
+    if (time !== 'all') p.set('since', time);
+    if (qStr) p.set('q', qStr);
+    p.set('limit', String(PAGE_SIZE));
+    p.set('offset', String((page - 1) * PAGE_SIZE));
+    return p.toString();
+  }, [tab, time, qStr, page]);
+
+  const { data: systemPage } = useQuery({
+    queryKey: ['system-jobs', 'list', systemParams],
+    queryFn: () => api.get<ApiPage<SystemJobRun>>(`/api/system-jobs?${systemParams}`),
+    enabled: isSystem,
+    refetchInterval: 60_000,
+  });
+  const systemJobs = systemPage?.items ?? [];
+  const systemListTotal = systemPage?.total ?? systemJobs.length;
+  const systemTotalPages = Math.max(1, Math.ceil(systemListTotal / PAGE_SIZE));
+
   // ─── SSE live updates ────────────────────────────
   useEffect(() => {
+    if (isSystem) return;
     return subscribeTasks((e) => {
       if (e.type === 'remove') {
         qc.invalidateQueries({ queryKey: ['tasks'] });
@@ -204,7 +261,7 @@ export function TasksPage() {
         qc.invalidateQueries({ queryKey: ['tasks', 'summary'] });
       }
     });
-  }, [qc]);
+  }, [isSystem, qc]);
 
   // ─── Selection ───────────────────────────────────
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -280,15 +337,30 @@ export function TasksPage() {
     onError: (e: Error) => toast.error(e.message || '取消失败'),
   });
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ['tasks'] });
+  const refresh = () => {
+    if (isSystem) {
+      qc.invalidateQueries({ queryKey: ['system-jobs'] });
+      return;
+    }
+    qc.invalidateQueries({ queryKey: ['tasks'] });
+  };
 
-  const tabCounts: Record<string, number | undefined> = {
+  const contentTabCounts: Record<string, number | undefined> = {
     all: totalCount || undefined,
     running: statusCounts.running,
     queued: statusCounts.queued,
     done: statusCounts.done,
     failed: statusCounts.failed,
   };
+  const systemTabCounts: Record<string, number | undefined> = {
+    all: systemTotalCount || undefined,
+    running: systemStatusCounts.running,
+    done: systemStatusCounts.done,
+    failed: systemStatusCounts.failed,
+    skipped: systemStatusCounts.skipped,
+  };
+  const tabCounts = isSystem ? systemTabCounts : contentTabCounts;
+  const visibleTabs = isSystem ? SYSTEM_STATUS_TABS : CONTENT_STATUS_TABS;
 
   const modelOptions = useMemo(() => {
     const opts: { v: string; label: string; count?: number }[] = [{ v: 'all', label: '全部' }];
@@ -308,11 +380,38 @@ export function TasksPage() {
     return `预计消耗 ¥${estCost.toFixed(2)}${failedN ? ` · ${failedN} 条失败将从断点续跑` : ''}`;
   }, [tasks, selected]);
 
-  const pagerShown = totalPages > 1;
+  const pagerShown = isSystem ? systemTotalPages > 1 : totalPages > 1;
 
   return (
     <Page>
-      <PageHead title="任务" meta={<span>全部任务链记录 · 按开始时间倒序</span>} />
+      <PageHead
+        title="任务"
+        meta={
+          <span>
+            {isSystem ? '系统定时任务记录 · 按开始时间倒序' : '全部任务链记录 · 按开始时间倒序'}
+          </span>
+        }
+      />
+
+      <div className={s.scopeTabs}>
+        {SCOPE_TABS.map((item) => (
+          <button
+            key={item.key}
+            className={[s.scopeTab, scope === item.key ? s.scopeTabOn : ''].join(' ')}
+            onClick={() =>
+              setFilter({
+                scope: item.key,
+                tab: null,
+                model: null,
+                stage: null,
+                q: null,
+              })
+            }
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
 
       <div className={s.headActions} style={{ justifyContent: 'flex-end', marginTop: -12 }}>
         <button className={[s.plainBtn, s.ghostBtn].join(' ')} onClick={refresh}>
@@ -324,45 +423,75 @@ export function TasksPage() {
       <div className={s.statsBar}>
         <div className={s.stat}>
           <span className={s.statKey}>
-            今日任务 <span className="pill">24h</span>
+            {isSystem ? '今日运行' : '今日任务'} <span className="pill">24h</span>
           </span>
-          <b className={s.statValue}>{summary?.today_tasks ?? '—'}</b>
+          <b className={s.statValue}>
+            {isSystem ? systemSummary?.today_runs ?? '—' : summary?.today_tasks ?? '—'}
+          </b>
           <span className={s.statDelta}>
-            {summary
-              ? `${statusCounts.done ?? 0} 成功 · ${statusCounts.failed ?? 0} 失败`
-              : '等待聚合'}
+            {isSystem
+              ? systemSummary
+                ? `${systemStatusCounts.done ?? 0} 成功 · ${systemStatusCounts.failed ?? 0} 失败`
+                : '等待聚合'
+              : summary
+                ? `${statusCounts.done ?? 0} 成功 · ${statusCounts.failed ?? 0} 失败`
+                : '等待聚合'}
           </span>
         </div>
         <div className={s.stat}>
           <span className={s.statKey}>成功率</span>
           <b className={s.statValue}>
-            {summary ? `${summary.today_success_rate.toFixed(1)}%` : '—'}
+            {isSystem
+              ? systemSummary
+                ? `${systemSummary.today_success_rate.toFixed(1)}%`
+                : '—'
+              : summary
+                ? `${summary.today_success_rate.toFixed(1)}%`
+                : '—'}
           </b>
-          <span className={s.statDelta}>今日端到端</span>
+          <span className={s.statDelta}>{isSystem ? '按周期统计' : '今日端到端'}</span>
         </div>
         <div className={s.stat}>
-          <span className={s.statKey}>今日消费</span>
+          <span className={s.statKey}>{isSystem ? '已刷新博主' : '今日消费'}</span>
           <b className={s.statValue}>
-            {summary ? `¥${summary.today_cost_cny.toFixed(2)}` : '—'}
+            {isSystem
+              ? systemSummary?.today_processed_items ?? '—'
+              : summary
+                ? `¥${summary.today_cost_cny.toFixed(2)}`
+                : '—'}
           </b>
-          <span className={s.statDelta}>DashScope 计费</span>
+          <span className={s.statDelta}>{isSystem ? '今日累计更新' : 'DashScope 计费'}</span>
         </div>
         <div className={s.stat}>
-          <span className={s.statKey}>Token 消耗</span>
-          <b className={s.statValue}>{summary ? fmtTokens(summary.today_total_tokens) : '—'}</b>
-          <span className={s.statDelta}>LLM · 今日</span>
+          <span className={s.statKey}>{isSystem ? '失败博主' : 'Token 消耗'}</span>
+          <b className={s.statValue}>
+            {isSystem
+              ? systemSummary?.today_failed_items ?? '—'
+              : summary
+                ? fmtTokens(summary.today_total_tokens)
+                : '—'}
+          </b>
+          <span className={s.statDelta}>{isSystem ? '今日累计失败' : 'LLM · 今日'}</span>
         </div>
         <div className={s.stat}>
           <span className={s.statKey}>平均耗时</span>
-          <b className={s.statValue}>{summary ? fmtElapsed(summary.avg_elapsed_ms) : '—'}</b>
-          <span className={s.statDelta}>单篇端到端</span>
+          <b className={s.statValue}>
+            {isSystem
+              ? systemSummary
+                ? fmtElapsed(systemSummary.avg_duration_ms)
+                : '—'
+              : summary
+                ? fmtElapsed(summary.avg_elapsed_ms)
+                : '—'}
+          </b>
+          <span className={s.statDelta}>{isSystem ? '单次周期' : '单篇端到端'}</span>
         </div>
       </div>
 
       {/* Filter bar */}
       <div className={s.filterBar}>
         <div className={s.tabs}>
-          {STATUS_TABS.map((t) => (
+          {visibleTabs.map((t) => (
             <button
               key={t.key}
               className={[s.tabBtn, tab === t.key ? s.tabOn : ''].join(' ')}
@@ -374,26 +503,30 @@ export function TasksPage() {
           ))}
         </div>
         <div className={s.divider} />
-        <Dropdown
-          id="model"
-          k="模型"
-          value={model}
-          label="全部"
-          options={modelOptions}
-          openId={openDrop}
-          setOpenId={setOpenDrop}
-          onSelect={(v) => setFilter({ model: v })}
-        />
-        <Dropdown
-          id="stage"
-          k="阶段"
-          value={stage}
-          label="全部"
-          options={STAGE_OPTIONS}
-          openId={openDrop}
-          setOpenId={setOpenDrop}
-          onSelect={(v) => setFilter({ stage: v })}
-        />
+        {!isSystem ? (
+          <>
+            <Dropdown
+              id="model"
+              k="模型"
+              value={model}
+              label="全部"
+              options={modelOptions}
+              openId={openDrop}
+              setOpenId={setOpenDrop}
+              onSelect={(v) => setFilter({ model: v })}
+            />
+            <Dropdown
+              id="stage"
+              k="阶段"
+              value={stage}
+              label="全部"
+              options={STAGE_OPTIONS}
+              openId={openDrop}
+              setOpenId={setOpenDrop}
+              onSelect={(v) => setFilter({ stage: v })}
+            />
+          </>
+        ) : null}
         <Dropdown
           id="time"
           k="时间"
@@ -410,7 +543,7 @@ export function TasksPage() {
             <path d="m20 20-3.5-3.5" />
           </svg>
           <input
-            placeholder="搜索任务 ID、文章标题…"
+            placeholder={isSystem ? '搜索运行 ID、任务名…' : '搜索任务 ID、文章标题…'}
             value={qDraft}
             onChange={(e) => setQDraft(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && submitSearch()}
@@ -418,11 +551,21 @@ export function TasksPage() {
           />
         </div>
         <span className={s.spacer} />
-        {tab !== 'all' || model !== 'all' || stage !== 'all' || time !== 'all' || qStr ? (
+        {tab !== 'all' ||
+        (!isSystem && model !== 'all') ||
+        (!isSystem && stage !== 'all') ||
+        time !== 'all' ||
+        qStr ? (
           <button
             className={[s.plainBtn, s.ghostBtn].join(' ')}
             onClick={() =>
-              setFilter({ tab: null, model: null, stage: null, time: null, q: null })
+              setFilter({
+                tab: null,
+                model: null,
+                stage: null,
+                time: null,
+                q: null,
+              })
             }
           >
             重置
@@ -433,18 +576,18 @@ export function TasksPage() {
       {/* List head */}
       <div className={s.listHead}>
         <h2>
-          任务列表
+          {isSystem ? '系统任务' : '任务列表'}
           <span className={s.listHeadMeta} style={{ marginLeft: 6 }}>
-            {listTotal.toLocaleString()} 条
+            {(isSystem ? systemListTotal : listTotal).toLocaleString()} 条
           </span>
         </h2>
         <span className={s.listHeadMeta}>
-          每页 {PAGE_SIZE} 条 · 第 {page} / {totalPages} 页
+          每页 {PAGE_SIZE} 条 · 第 {page} / {isSystem ? systemTotalPages : totalPages} 页
         </span>
       </div>
 
       {/* Bulk bar */}
-      {selected.size > 0 ? (
+      {!isSystem && selected.size > 0 ? (
         <div className={s.bulkBar}>
           <span className={s.bulkCount}>
             <b>{selected.size}</b>已选
@@ -474,95 +617,145 @@ export function TasksPage() {
       {/* Table */}
       <div className={s.table}>
         <div className={s.tableScroll}>
-          <div className={s.tHead}>
-            <span>
-              <button className={allCbxCls} onClick={toggleAll} aria-label="全选" />
-            </span>
-            <span />
-            <span>任务 ID</span>
-            <span>文章 / 博主</span>
-            <span>任务链</span>
-            <span>成本 · Token · 耗时</span>
-            <span />
-          </div>
+          {!isSystem ? (
+            <>
+              <div className={s.tHead}>
+                <span>
+                  <button className={allCbxCls} onClick={toggleAll} aria-label="全选" />
+                </span>
+                <span />
+                <span>任务 ID</span>
+                <span>文章 / 博主</span>
+                <span>任务链</span>
+                <span>成本 · Token · 耗时</span>
+                <span />
+              </div>
 
-          {tasks.length === 0 ? (
-            <div className={s.emptyBlock}>暂无匹配的任务</div>
-          ) : (
-            tasks.map((t, i) => {
-              const isSel = selected.has(t.id);
-              const stageLabel =
-                t.status === 'done' ? 'completed' : STAGE_LABEL[t.stage] || t.stage;
-              return (
-                <div
-                  key={t.id}
-                  className={[s.tRow, isSel ? s.tRowSelected : ''].join(' ')}
-                  onClick={(e) => {
-                    const tgt = e.target as HTMLElement;
-                    if (tgt.closest('button,[role="checkbox"]')) return;
-                    setDrawerId(t.id);
-                  }}
-                >
-                  <span>
-                    <button
-                      className={[s.cbx, isSel ? s.cbxOn : ''].join(' ')}
-                      role="checkbox"
-                      aria-checked={isSel}
+              {tasks.length === 0 ? (
+                <div className={s.emptyBlock}>暂无匹配的任务</div>
+              ) : (
+                tasks.map((t, i) => {
+                  const isSel = selected.has(t.id);
+                  const stageLabel =
+                    t.status === 'done' ? 'completed' : STAGE_LABEL[t.stage] || t.stage;
+                  return (
+                    <div
+                      key={t.id}
+                      className={[s.tRow, isSel ? s.tRowSelected : ''].join(' ')}
                       onClick={(e) => {
-                        e.stopPropagation();
-                        toggleOne(t.id);
+                        const tgt = e.target as HTMLElement;
+                        if (tgt.closest('button,[role="checkbox"]')) return;
+                        setDrawerId(t.id);
                       }}
-                      aria-label="选择"
-                    />
-                  </span>
-                  <span className={[s.stDot, statusDot(t.status)].join(' ')} title={t.status} />
-                  <div className={s.taskId}>
-                    <span className={s.taskIdShort}>{t.id.slice(0, 12)}</span>
-                    <span className={s.taskIdStage}>{stageLabel}</span>
-                  </div>
-                  <div className={s.articleCell}>
-                    <TaskCover
-                      seed={(t.creator_id ?? 0) + i}
-                      label={labelFromTitle(t.title_guess || t.article_title || '')}
-                      src={t.cover_url}
-                    />
-                    <div className={s.articleMain}>
-                      <span className={s.articleTitle}>
-                        {t.article_title || t.title_guess || '解析中…'}
+                    >
+                      <span>
+                        <button
+                          className={[s.cbx, isSel ? s.cbxOn : ''].join(' ')}
+                          role="checkbox"
+                          aria-checked={isSel}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleOne(t.id);
+                          }}
+                          aria-label="选择"
+                        />
                       </span>
+                      <span className={[s.stDot, statusDot(t.status)].join(' ')} title={t.status} />
+                      <div className={s.taskId}>
+                        <span className={s.taskIdShort}>{t.id.slice(0, 12)}</span>
+                        <span className={s.taskIdStage}>{stageLabel}</span>
+                      </div>
+                      <div className={s.articleCell}>
+                        <TaskCover
+                          seed={(t.creator_id ?? 0) + i}
+                          label={labelFromTitle(t.title_guess || t.article_title || '')}
+                          src={t.cover_url}
+                        />
+                        <div className={s.articleMain}>
+                          <span className={s.articleTitle}>
+                            {t.article_title || t.title_guess || '解析中…'}
+                          </span>
+                          <span className={s.articleAuthor}>
+                            {t.creator_name ?? '—'} · {formatRelative(t.started_at)}
+                          </span>
+                        </div>
+                      </div>
+                      <TaskChainBar stage={t.stage} status={t.status} />
+                      <div className={s.costCell}>
+                        <b>{fmtCost(t.cost_cny)}</b>
+                        <span className={s.costSub}>
+                          {t.status === 'running' || t.status === 'queued' ? (
+                            t.status === 'running' ? '进行中' : '排队中'
+                          ) : (
+                            <>
+                              {fmtTokens(t.total_tokens)} tok
+                              <span className={s.costDot}>·</span>
+                              {fmtElapsed(t.elapsed_ms)}
+                            </>
+                          )}
+                        </span>
+                      </div>
+                      <button
+                        className={s.rowAct}
+                        title="查看详情"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDrawerId(t.id);
+                        }}
+                      >
+                        <Icon name="chevron" size={13} />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </>
+          ) : (
+            <>
+              <div className={[s.tHead, s.sysHead].join(' ')}>
+                <span />
+                <span>运行 ID</span>
+                <span>系统任务</span>
+                <span>处理结果</span>
+                <span>耗时</span>
+                <span>最近执行</span>
+              </div>
+
+              {systemJobs.length === 0 ? (
+                <div className={s.emptyBlock}>暂无系统任务记录</div>
+              ) : (
+                systemJobs.map((job) => (
+                  <div key={job.id} className={[s.tRow, s.sysRow].join(' ')}>
+                    <span className={[s.stDot, statusDot(job.status)].join(' ')} title={job.status} />
+                    <div className={s.taskId}>
+                      <span className={s.taskIdShort}>{job.id.slice(0, 12)}</span>
+                      <span className={s.taskIdStage}>{systemStageLabel(job.status)}</span>
+                    </div>
+                    <div className={s.sysMain}>
+                      <span className={s.articleTitle}>{job.job_name}</span>
                       <span className={s.articleAuthor}>
-                        {t.creator_name ?? '—'} · {formatRelative(t.started_at)}
+                        {job.scope ?? '系统后台任务'}
+                        {job.detail ? ` · ${job.detail}` : ''}
+                      </span>
+                      {job.error ? <span className={s.sysError}>{job.error}</span> : null}
+                    </div>
+                    <div className={s.sysResult}>
+                      <b>
+                        {job.processed_items}/{job.total_items || 0}
+                      </b>
+                      <span className={s.costSub}>
+                        失败 {job.failed_items} · 跳过 {job.skipped_items}
                       </span>
                     </div>
+                    <div className={s.num}>{fmtElapsed(job.duration_ms)}</div>
+                    <div className={s.sysWhen}>
+                      <span>{formatRelative(job.started_at)}</span>
+                      <span className={s.articleAuthor}>{job.finished_at ? '已完成' : '进行中'}</span>
+                    </div>
                   </div>
-                  <TaskChainBar stage={t.stage} status={t.status} />
-                  <div className={s.costCell}>
-                    <b>{fmtCost(t.cost_cny)}</b>
-                    <span className={s.costSub}>
-                      {t.status === 'running' || t.status === 'queued' ? (
-                        t.status === 'running' ? '进行中' : '排队中'
-                      ) : (
-                        <>
-                          {fmtTokens(t.total_tokens)} tok
-                          <span className={s.costDot}>·</span>
-                          {fmtElapsed(t.elapsed_ms)}
-                        </>
-                      )}
-                    </span>
-                  </div>
-                  <button
-                    className={s.rowAct}
-                    title="查看详情"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDrawerId(t.id);
-                    }}
-                  >
-                    <Icon name="chevron" size={13} />
-                  </button>
-                </div>
-              );
-            })
+                ))
+              )}
+            </>
           )}
         </div>
       </div>
@@ -570,13 +763,13 @@ export function TasksPage() {
       {pagerShown ? (
         <div className={s.pager}>
           <span>
-            共 {totalPages} 页 · 每页 {PAGE_SIZE} 条
+            共 {isSystem ? systemTotalPages : totalPages} 页 · 每页 {PAGE_SIZE} 条
           </span>
           <div className={s.pagerBtns}>
             <button disabled={page <= 1} onClick={() => setFilter({ page: String(page - 1) })}>
               ‹
             </button>
-            {buildPageNumbers(page, totalPages).map((p, i) =>
+            {buildPageNumbers(page, isSystem ? systemTotalPages : totalPages).map((p, i) =>
               p === '...' ? (
                 <button key={`e${i}`} disabled>
                   …
@@ -592,7 +785,7 @@ export function TasksPage() {
               ),
             )}
             <button
-              disabled={page >= totalPages}
+              disabled={page >= (isSystem ? systemTotalPages : totalPages)}
               onClick={() => setFilter({ page: String(page + 1) })}
             >
               ›
@@ -601,7 +794,7 @@ export function TasksPage() {
         </div>
       ) : null}
 
-      {drawerId ? (
+      {!isSystem && drawerId ? (
         <TaskDrawer
           taskId={drawerId}
           onClose={() => setDrawerId(null)}

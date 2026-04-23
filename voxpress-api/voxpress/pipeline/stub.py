@@ -67,6 +67,7 @@ class StubLLM(LLMBackend):
         title_hint: str,
         creator_hint: str,
         prompt_template: str,
+        duration_sec: int | None = None,
     ) -> dict:
         await asyncio.sleep(1.0)
         summary = "这是由 stub LLM 生成的摘要。接入 DashScope 后替换。"

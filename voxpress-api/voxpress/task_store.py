@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -163,23 +164,144 @@ async def _build_task_payload_from_session(
     return payload
 
 
+async def _build_task_payloads_from_session(
+    s,
+    tasks: list[Task],
+    *,
+    include_stage_runs: bool = False,
+) -> list[dict[str, Any]]:
+    if not tasks:
+        return []
+
+    task_ids = [task.id for task in tasks]
+    creator_ids = {task.creator_id for task in tasks if task.creator_id is not None}
+    explicit_video_ids = {task.video_id for task in tasks if task.video_id}
+    fallback_source_urls = {task.source_url for task in tasks if not task.video_id}
+    explicit_article_ids = {task.article_id for task in tasks if task.article_id is not None}
+
+    creators = {
+        creator.id: creator
+        for creator in (
+            (await s.scalars(select(Creator).where(Creator.id.in_(creator_ids)))).all() if creator_ids else []
+        )
+    }
+
+    videos_by_id = {
+        video.id: video
+        for video in (
+            (await s.scalars(select(Video).where(Video.id.in_(explicit_video_ids)))).all() if explicit_video_ids else []
+        )
+    }
+    videos_by_source: dict[str, Video] = {}
+    if fallback_source_urls:
+        rows = (
+            await s.scalars(
+                select(Video)
+                .where(Video.source_url.in_(fallback_source_urls))
+                .order_by(Video.updated_at.desc())
+            )
+        ).all()
+        for video in rows:
+            videos_by_source.setdefault(video.source_url, video)
+
+    resolved_videos = []
+    for task in tasks:
+        video = videos_by_id.get(task.video_id) if task.video_id else None
+        if video is None:
+            video = videos_by_source.get(task.source_url)
+        if video is not None:
+            resolved_videos.append(video)
+    resolved_video_ids = {video.id for video in resolved_videos}
+
+    articles_by_id = {
+        article.id: article
+        for article in (
+            (await s.scalars(select(Article).where(Article.id.in_(explicit_article_ids)))).all()
+            if explicit_article_ids
+            else []
+        )
+    }
+    articles_by_video = {
+        article.video_id: article
+        for article in (
+            (await s.scalars(select(Article).where(Article.video_id.in_(resolved_video_ids)))).all()
+            if resolved_video_ids
+            else []
+        )
+    }
+
+    runs_by_task: dict[UUID, list[TaskStageRun]] = defaultdict(list)
+    runs = (
+        await s.scalars(
+            select(TaskStageRun)
+            .where(TaskStageRun.task_id.in_(task_ids))
+            .order_by(TaskStageRun.started_at.asc().nulls_last(), TaskStageRun.stage.asc())
+        )
+    ).all()
+    for run in runs:
+        runs_by_task[run.task_id].append(run)
+
+    payloads: list[dict[str, Any]] = []
+    for task in tasks:
+        creator = creators.get(task.creator_id) if task.creator_id is not None else None
+        video = videos_by_id.get(task.video_id) if task.video_id else None
+        if video is None:
+            video = videos_by_source.get(task.source_url)
+        article = articles_by_id.get(task.article_id) if task.article_id is not None else None
+        if article is None and video is not None:
+            article = articles_by_video.get(video.id)
+        task_runs = runs_by_task.get(task.id, [])
+        payload = {
+            "id": str(task.id),
+            "source_url": task.source_url,
+            "title_guess": task.title_guess,
+            "creator_id": task.creator_id,
+            "creator_name": creator.name if creator else None,
+            "creator_initial": first_grapheme(creator.name) if creator else None,
+            "stage": task.stage,
+            "status": task.status,
+            "progress": task.progress,
+            "eta_sec": task.eta_sec,
+            "detail": task.detail,
+            "article_id": str(task.article_id) if task.article_id else (str(article.id) if article else None),
+            "article_title": article.title if article else None,
+            "cover_url": video.cover_url if video else None,
+            "error": task.error,
+            "trigger_kind": task.trigger_kind,
+            "rerun_of_task_id": str(task.rerun_of_task_id) if task.rerun_of_task_id else None,
+            "resume_from_stage": task.resume_from_stage,
+            "primary_model": _pick_primary_model(task_runs),
+            "models": [run.model for run in task_runs if run.model],
+            "elapsed_ms": _elapsed_ms(task),
+            "input_tokens": int(task.input_tokens or 0),
+            "output_tokens": int(task.output_tokens or 0),
+            "total_tokens": int(task.total_tokens or 0),
+            "cost_cny": float(task.cost_cny or 0.0),
+            "started_at": _iso(task.started_at),
+            "updated_at": _iso(task.updated_at),
+            "finished_at": _iso(task.finished_at),
+        }
+        if include_stage_runs:
+            payload["stage_runs"] = [_serialize_stage_run(run) for run in task_runs]
+        payloads.append(payload)
+    return payloads
+
+
 async def build_task_payload(task_id: UUID | str) -> dict[str, Any] | None:
     async with session_scope() as s:
         task = await s.get(Task, task_id)
         if task is None:
             return None
-        return await _build_task_payload_from_session(s, task)
+        payloads = await _build_task_payloads_from_session(s, [task])
+        return payloads[0] if payloads else None
 
 
 async def build_task_payloads(task_ids: list[UUID | str]) -> list[dict[str, Any]]:
     async with session_scope() as s:
-        payloads: list[dict[str, Any]] = []
-        for task_id in task_ids:
-            task = await s.get(Task, task_id)
-            if task is None:
-                continue
-            payloads.append(await _build_task_payload_from_session(s, task))
-        return payloads
+        tasks = list((await s.scalars(select(Task).where(Task.id.in_(task_ids)))).all())
+        task_map = {task.id: task for task in tasks}
+        ordered = [task_map[task_id] for task_id in task_ids if task_id in task_map]
+        return await _build_task_payloads_from_session(s, ordered)
 
 
 async def build_task_detail_payload(task_id: UUID | str) -> dict[str, Any] | None:
@@ -187,7 +309,10 @@ async def build_task_detail_payload(task_id: UUID | str) -> dict[str, Any] | Non
         task = await s.get(Task, task_id)
         if task is None:
             return None
-        payload = await _build_task_payload_from_session(s, task, include_stage_runs=True)
+        payloads = await _build_task_payloads_from_session(s, [task], include_stage_runs=True)
+        if not payloads:
+            return None
+        payload = payloads[0]
         payload["available_rerun_modes"] = await available_rerun_modes(task.id, session=s)
         return payload
 

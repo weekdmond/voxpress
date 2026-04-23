@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+# VoxPress service control — postgres · api · web
+# Usage: ./scripts/vp <command> [args]
+#   up [api|web|all]          启动(默认 all:确保 pg + api + web)
+#   down [api|web|all]        停止(默认 all:只停 api + web,brew 服务不动)
+#   restart [api|web|all]
+#   status                    查看所有服务
+#   logs <api|web> [-f]       查看日志(-f 跟随)
+#   pg <start|stop|restart>   管理 brew postgresql@16
+#   db                        进入 psql voxpress
+#   help
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+API_DIR="$ROOT/voxpress-api"
+WEB_DIR="$ROOT/voxpress"
+LOG_DIR="/tmp"
+API_LOG="$LOG_DIR/voxpress-api.log"
+WEB_LOG="$LOG_DIR/voxpress-web.log"
+API_PORT=8787
+WEB_PORT=5173
+PG_PORT=5432
+
+c_reset=$'\033[0m'; c_dim=$'\033[2m'; c_red=$'\033[31m'; c_grn=$'\033[32m'; c_ylw=$'\033[33m'; c_cyn=$'\033[36m'; c_bld=$'\033[1m'
+
+die()  { echo "${c_red}✗${c_reset} $*" >&2; exit 1; }
+info() { echo "${c_cyn}→${c_reset} $*"; }
+ok()   { echo "${c_grn}✓${c_reset} $*"; }
+warn() { echo "${c_ylw}!${c_reset} $*"; }
+
+pid_on_port() { lsof -ti ":$1" -sTCP:LISTEN 2>/dev/null | head -1; }
+
+wait_port() {
+  local port=$1 timeout=${2:-15} i=0
+  while [ $i -lt "$timeout" ]; do
+    if [ -n "$(pid_on_port "$port")" ]; then return 0; fi
+    sleep 1; i=$((i + 1))
+  done
+  return 1
+}
+
+kill_port() {
+  local port=$1 label=$2 pid
+  pid=$(pid_on_port "$port" || true)
+  if [ -z "$pid" ]; then
+    echo "${c_dim}  $label: 未运行${c_reset}"
+    return 0
+  fi
+  info "停止 $label (pid=$pid, port=$port)"
+  kill "$pid" 2>/dev/null || true
+  local i=0
+  while [ $i -lt 10 ] && kill -0 "$pid" 2>/dev/null; do sleep 0.5; i=$((i + 1)); done
+  if kill -0 "$pid" 2>/dev/null; then
+    warn "$label 未在 5s 内退出,发送 SIGKILL"
+    kill -9 "$pid" 2>/dev/null || true
+  fi
+  ok "$label 已停止"
+}
+
+start_api() {
+  if [ -n "$(pid_on_port $API_PORT)" ]; then
+    warn "api 已在 :$API_PORT 运行 (pid=$(pid_on_port $API_PORT)),跳过"
+    return 0
+  fi
+  [ -x "$API_DIR/.venv/bin/uvicorn" ] || die "未找到 $API_DIR/.venv/bin/uvicorn;先跑 uv sync"
+  info "启动 api → $API_LOG"
+  (
+    cd "$API_DIR"
+    nohup .venv/bin/uvicorn voxpress.main:app --host 127.0.0.1 --port $API_PORT --workers 1 \
+      >"$API_LOG" 2>&1 &
+    disown
+  )
+  if wait_port $API_PORT 20; then
+    ok "api 已就绪 http://127.0.0.1:$API_PORT (pid=$(pid_on_port $API_PORT))"
+  else
+    die "api 启动失败,查看日志: tail -50 $API_LOG"
+  fi
+}
+
+start_web() {
+  if [ -n "$(pid_on_port $WEB_PORT)" ]; then
+    warn "web 已在 :$WEB_PORT 运行 (pid=$(pid_on_port $WEB_PORT)),跳过"
+    return 0
+  fi
+  [ -d "$WEB_DIR/node_modules" ] || die "未安装依赖;先跑 bun install 或 npm install"
+  info "启动 web → $WEB_LOG"
+  (
+    cd "$WEB_DIR"
+    nohup npx vite --port $WEB_PORT --host 127.0.0.1 >"$WEB_LOG" 2>&1 &
+    disown
+  )
+  if wait_port $WEB_PORT 20; then
+    ok "web 已就绪 http://127.0.0.1:$WEB_PORT (pid=$(pid_on_port $WEB_PORT))"
+  else
+    die "web 启动失败,查看日志: tail -50 $WEB_LOG"
+  fi
+}
+
+stop_api() { kill_port $API_PORT api; }
+stop_web() { kill_port $WEB_PORT web; }
+
+ensure_pg() {
+  if [ -z "$(pid_on_port $PG_PORT)" ]; then
+    info "postgresql@16 未运行,brew services start"
+    brew services start postgresql@16 >/dev/null
+    wait_port $PG_PORT 15 || die "postgres 启动失败"
+  fi
+  ok "postgres :$PG_PORT"
+}
+
+status_one() {
+  local port=$1 label=$2 pid
+  pid=$(pid_on_port "$port" || true)
+  if [ -n "$pid" ]; then
+    printf "  %s  %-8s ${c_grn}running${c_reset}  pid=%s  :%s\n" "✓" "$label" "$pid" "$port"
+  else
+    printf "  %s  %-8s ${c_dim}stopped${c_reset}             :%s\n" "·" "$label" "$port"
+  fi
+}
+
+cmd_status() {
+  echo "${c_bld}VoxPress 服务状态${c_reset}"
+  status_one $PG_PORT  postgres
+  status_one $API_PORT api
+  status_one $WEB_PORT web
+  echo
+  echo "${c_dim}logs:  api=$API_LOG  web=$WEB_LOG${c_reset}"
+}
+
+cmd_up() {
+  local target=${1:-all}
+  case "$target" in
+    all) ensure_pg; start_api; start_web ;;
+    api) ensure_pg; start_api ;;
+    web) start_web ;;
+    *)   die "未知目标: $target (all|api|web)" ;;
+  esac
+}
+
+cmd_down() {
+  local target=${1:-all}
+  case "$target" in
+    all) stop_api; stop_web ;;
+    api) stop_api ;;
+    web) stop_web ;;
+    *)   die "未知目标: $target (all|api|web)" ;;
+  esac
+}
+
+cmd_restart() {
+  local target=${1:-all}
+  case "$target" in
+    all) stop_api; stop_web; ensure_pg; start_api; start_web ;;
+    api) stop_api; ensure_pg; start_api ;;
+    web) stop_web; start_web ;;
+    *)   die "未知目标: $target (all|api|web)" ;;
+  esac
+}
+
+cmd_logs() {
+  local target=${1:-}
+  [ -n "$target" ] || die "用法: vp logs <api|web> [-f]"
+  local file
+  case "$target" in
+    api) file="$API_LOG" ;;
+    web) file="$WEB_LOG" ;;
+    *)   die "未知目标: $target (api|web)" ;;
+  esac
+  [ -f "$file" ] || die "日志不存在: $file"
+  shift
+  if [ "${1:-}" = "-f" ]; then
+    tail -f "$file"
+  else
+    tail -60 "$file"
+  fi
+}
+
+cmd_pg() {
+  local action=${1:-status}
+  case "$action" in
+    start)   brew services start postgresql@16 ;;
+    stop)    brew services stop  postgresql@16 ;;
+    restart) brew services restart postgresql@16 ;;
+    *)       die "用法: vp pg <start|stop|restart>" ;;
+  esac
+}
+
+cmd_db() { exec psql voxpress; }
+
+cmd_help() {
+  awk '/^# VoxPress/{p=1} p && /^# /{sub(/^# ?/,""); print; next} p && !/^#/{exit}' "$0"
+}
+
+main() {
+  local cmd=${1:-help}
+  shift || true
+  case "$cmd" in
+    up|start)     cmd_up "$@" ;;
+    down|stop)    cmd_down "$@" ;;
+    restart)      cmd_restart "$@" ;;
+    status|ps)    cmd_status ;;
+    logs|log)     cmd_logs "$@" ;;
+    pg|postgres)  cmd_pg "$@" ;;
+    db|psql)      cmd_db ;;
+    help|-h|--help) cmd_help ;;
+    *)            warn "未知命令: $cmd"; cmd_help; exit 1 ;;
+  esac
+}
+
+main "$@"

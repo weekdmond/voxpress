@@ -16,6 +16,7 @@ from voxpress.routers import (
     media,
     resolve,
     settings as settings_router,
+    system_jobs,
     tasks,
     videos,
 )
@@ -44,6 +45,7 @@ def create_app() -> FastAPI:
     app.include_router(videos.router)
     app.include_router(articles.router)
     app.include_router(tasks.router)
+    app.include_router(system_jobs.router)
     app.include_router(media.router)
     app.include_router(resolve.router)
     app.include_router(settings_router.router)

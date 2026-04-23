@@ -4,6 +4,39 @@
   gap: 6px;
 }
 
+.scopeTabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--vp-line);
+  background: var(--vp-panel);
+  border-radius: var(--vp-radius-lg);
+  margin-bottom: 10px;
+  box-shadow: var(--vp-shadow-sm);
+}
+
+.scopeTab {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 7px;
+  border: 0;
+  background: transparent;
+  color: var(--vp-ink-3);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.scopeTab:hover {
+  color: var(--vp-ink);
+}
+
+.scopeTabOn {
+  background: var(--vp-accent-2);
+  color: #fff;
+  box-shadow: var(--vp-shadow-sm);
+}
+
 /* ─── Stats bar ────────────────────────────────────── */
 .statsBar {
   display: grid;
@@ -389,6 +422,10 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
+.sysHead,
+.sysRow {
+  grid-template-columns: 12px 120px minmax(260px, 1.5fr) 160px 100px 120px;
+}
 .sort {
   display: inline-flex;
   align-items: center;
@@ -488,6 +525,39 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
+}
+.sysMain {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.sysResult {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--vp-font-mono);
+}
+.sysResult b {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--vp-ink);
+}
+.sysWhen {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--vp-font-mono);
+  font-size: 11px;
+  color: var(--vp-ink-2);
+}
+.sysError {
+  font-family: var(--vp-font-mono);
+  font-size: 10.5px;
+  color: #a84040;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .articleTitle {
   font-weight: 500;

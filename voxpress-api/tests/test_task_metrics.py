@@ -3,13 +3,13 @@ from voxpress.task_metrics import asr_usage, llm_usage_from_dashscope, merge_usa
 
 def test_llm_usage_from_dashscope_known_model() -> None:
     usage = llm_usage_from_dashscope(
-        "qwen-plus",
+        "qwen3.6-plus",
         {"prompt_tokens": 3500, "completion_tokens": 1500, "total_tokens": 5000},
     )
     assert usage["input_tokens"] == 3500
     assert usage["output_tokens"] == 1500
     assert usage["total_tokens"] == 5000
-    assert usage["cost_cny"] == 0.0058
+    assert usage["cost_cny"] == 0.0250
 
 
 def test_llm_usage_from_dashscope_unknown_model_zero_cost() -> None:
