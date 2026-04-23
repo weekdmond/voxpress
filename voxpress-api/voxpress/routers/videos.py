@@ -167,7 +167,7 @@ async def get_video_media(video_id: str, s: AsyncSession = Depends(get_session))
     video = await s.get(Video, video_id)
     if not video or not video.media_object_key:
         raise NotFound("视频尚未归档到媒体存储")
-    if not media_store.enabled:
+    if not await media_store.is_enabled():
         raise NotFound("媒体存储尚未配置")
     try:
         signed = await media_store.sign_url(video.media_object_key)

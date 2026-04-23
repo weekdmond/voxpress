@@ -392,9 +392,34 @@ class CookieSettings(BaseModel):
     source_name: str | None = None
 
 
+class DashScopeSettingsOut(BaseModel):
+    configured: bool = False
+    base_url: str = Field(default_factory=lambda: app_settings.dashscope_compatible_base_url)
+
+
+class DashScopeSettingsPatch(BaseModel):
+    api_key: str | None = None
+    base_url: str | None = None
+
+
 class StorageSettings(BaseModel):
     audio_retain_days: int = 7
     used_bytes: int = 0
+
+
+class OssSettingsOut(BaseModel):
+    configured: bool = False
+    region: str | None = None
+    endpoint: str | None = None
+    bucket: str | None = None
+
+
+class OssSettingsPatch(BaseModel):
+    region: str | None = None
+    endpoint: str | None = None
+    bucket: str | None = None
+    access_key_id: str | None = None
+    access_key_secret: str | None = None
 
 
 class SettingsOut(BaseModel):
@@ -404,6 +429,8 @@ class SettingsOut(BaseModel):
     article: ArticleSettings
     prompt: PromptSettings
     cookie: CookieSettings
+    dashscope: DashScopeSettingsOut
+    oss: OssSettingsOut
     storage: StorageSettings
 
 
@@ -414,6 +441,8 @@ class SettingsPatch(BaseModel):
     article: ArticleSettings | None = None
     prompt: PromptSettings | None = None
     cookie: CookieSettings | None = None
+    dashscope: DashScopeSettingsPatch | None = None
+    oss: OssSettingsPatch | None = None
     storage: StorageSettings | None = None
 
 

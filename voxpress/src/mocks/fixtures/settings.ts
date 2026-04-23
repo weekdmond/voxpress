@@ -30,6 +30,10 @@ export const defaultSettings: Settings = {
     last_tested_at: null,
     source_name: null,
   },
+  dashscope: {
+    configured: true,
+    base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  },
   storage: {
     audio_retain_days: 7,
     used_bytes: 824_000_000,
@@ -37,7 +41,7 @@ export const defaultSettings: Settings = {
 };
 
 export const availableModels = {
-  llm: ['qwen3.6-plus', 'qwen-plus', 'qwen-plus-latest', 'qwen-turbo', 'qwen-flash'],
-  corrector: ['qwen-turbo-latest', 'qwen-turbo', 'qwen-flash', 'qwen3.6-plus', 'qwen-plus'],
+  llm: ['qwen3.6-plus', 'qwen3.6-plus-2026-04-02', 'qwen-plus', 'qwen-plus-latest', 'qwen-turbo', 'qwen-flash'],
+  corrector: ['qwen-turbo-latest', 'qwen-turbo', 'qwen-flash', 'qwen3.6-plus', 'qwen3.6-plus-2026-04-02', 'qwen-plus'],
   transcribe: ['qwen3-asr-flash-filetrans'],
 };

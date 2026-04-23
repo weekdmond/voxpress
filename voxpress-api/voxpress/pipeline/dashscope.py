@@ -22,13 +22,10 @@ from voxpress.prompts import (
     DEFAULT_CORRECTOR_TEMPLATE,
     DEFAULT_ORGANIZER_TEMPLATE,
 )
+from voxpress.runtime_settings import load_dashscope_runtime_settings
 from voxpress.task_metrics import llm_usage_from_dashscope, merge_usage
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_LLM_MODELS = settings.dashscope_llm_models_list
-DEFAULT_CORRECTOR_MODELS = settings.dashscope_corrector_models_list
-DEFAULT_ASR_MODELS = settings.dashscope_asr_models_list
 
 
 class DashScopeError(RuntimeError):
@@ -43,10 +40,16 @@ class DashScopeChatResult:
 
 class DashScopeChatClient:
     def __init__(self, *, api_key: str | None = None, base_url: str | None = None) -> None:
-        self.api_key = (api_key or settings.dashscope_api_key or "").strip()
-        self.base_url = (base_url or settings.dashscope_chat_base_url).rstrip("/")
-        if not self.api_key:
+        self.api_key = (api_key or "").strip()
+        self.base_url = (base_url or "").rstrip("/")
+
+    async def _resolve_credentials(self) -> tuple[str, str]:
+        runtime = await load_dashscope_runtime_settings()
+        api_key = self.api_key or runtime.api_key
+        base_url = (self.base_url or runtime.chat_base_url).rstrip("/")
+        if not api_key:
             raise DashScopeError("DashScope API Key 未配置")
+        return api_key, base_url
 
     async def chat_json_result(
         self,
@@ -57,11 +60,12 @@ class DashScopeChatClient:
         temperature: float,
         timeout_sec: float,
     ) -> DashScopeChatResult:
+        api_key, base_url = await self._resolve_credentials()
         async with httpx.AsyncClient(timeout=timeout_sec, trust_env=False) as client:
             response = await client.post(
-                f"{self.base_url}/chat/completions",
+                f"{base_url}/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {self.api_key}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 },
                 json={
@@ -280,10 +284,12 @@ class DashScopeCorrector:
 class DashScopeFileTranscriber(Transcriber):
     def __init__(self, *, model: str | None = None) -> None:
         self.model = model or settings.dashscope_default_asr_model
-        self.api_key = (settings.dashscope_api_key or "").strip()
-        self.api_base_url = settings.dashscope_api_base_url.rstrip("/")
-        if not self.api_key:
+
+    async def _resolve_credentials(self) -> tuple[str, str]:
+        runtime = await load_dashscope_runtime_settings()
+        if not runtime.api_key:
             raise DashScopeError("DashScope API Key 未配置")
+        return runtime.api_key, runtime.api_base_url
 
     async def transcribe(
         self,
@@ -291,7 +297,7 @@ class DashScopeFileTranscriber(Transcriber):
         language: str = "zh",
         initial_prompt: str | None = None,
     ) -> TranscriptResult:
-        if not media_store.enabled:
+        if not await media_store.is_enabled():
             raise DashScopeError("Qwen3-ASR-Flash-Filetrans 需要已配置 OSS 才能提交音频文件 URL")
         if not audio_path.exists():
             raise DashScopeError(f"音频文件不存在: {audio_path}")
@@ -307,8 +313,19 @@ class DashScopeFileTranscriber(Transcriber):
             raise DashScopeError("OSS 音频对象键为空，无法提交 ASR 任务")
         file_url = await media_store.sign_url(object_key)
 
-        task_id = await self._submit(file_url=file_url, language=language, initial_prompt=initial_prompt)
-        result_url = await self._wait_result_url(task_id)
+        api_key, api_base_url = await self._resolve_credentials()
+        task_id = await self._submit(
+            file_url=file_url,
+            language=language,
+            initial_prompt=initial_prompt,
+            api_key=api_key,
+            api_base_url=api_base_url,
+        )
+        result_url = await self._wait_result_url(
+            task_id,
+            api_key=api_key,
+            api_base_url=api_base_url,
+        )
         async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
             response = await client.get(result_url)
             _raise_dashscope_http_error(response, prefix="下载 ASR 结果失败")
@@ -321,6 +338,8 @@ class DashScopeFileTranscriber(Transcriber):
         file_url: str,
         language: str,
         initial_prompt: str | None,
+        api_key: str,
+        api_base_url: str,
     ) -> str:
         parameters: dict[str, Any] = {
             "channel_id": [0],
@@ -334,9 +353,9 @@ class DashScopeFileTranscriber(Transcriber):
 
         async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
             response = await client.post(
-                f"{self.api_base_url}/services/audio/asr/transcription",
+                f"{api_base_url}/services/audio/asr/transcription",
                 headers={
-                    "Authorization": f"Bearer {self.api_key}",
+                    "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                     "X-DashScope-Async": "enable",
                 },
@@ -353,15 +372,21 @@ class DashScopeFileTranscriber(Transcriber):
             raise DashScopeError(f"ASR 提交成功但未返回 task_id: {payload}")
         return task_id
 
-    async def _wait_result_url(self, task_id: str) -> str:
+    async def _wait_result_url(
+        self,
+        task_id: str,
+        *,
+        api_key: str,
+        api_base_url: str,
+    ) -> str:
         deadline = asyncio.get_running_loop().time() + settings.dashscope_asr_timeout_sec
         last_status = "PENDING"
         async with httpx.AsyncClient(timeout=60.0, trust_env=False) as client:
             while True:
                 response = await client.get(
-                    f"{self.api_base_url}/tasks/{task_id}",
+                    f"{api_base_url}/tasks/{task_id}",
                     headers={
-                        "Authorization": f"Bearer {self.api_key}",
+                        "Authorization": f"Bearer {api_key}",
                         "Content-Type": "application/json",
                         "X-DashScope-Async": "enable",
                     },

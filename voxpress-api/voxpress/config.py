@@ -26,9 +26,6 @@ class Settings(BaseSettings):
     dashscope_default_llm_model: str = "qwen3.6-plus"
     dashscope_default_corrector_model: str = "qwen-turbo"
     dashscope_default_asr_model: str = "qwen3-asr-flash-filetrans"
-    dashscope_llm_models: str = "qwen3.6-plus,qwen-plus,qwen-plus-latest,qwen-turbo,qwen-flash"
-    dashscope_corrector_models: str = "qwen-turbo,qwen-flash,qwen3.6-plus,qwen-plus"
-    dashscope_asr_models: str = "qwen3-asr-flash-filetrans"
     dashscope_chat_pricing: str = (
         '{"qwen3.6-plus":[0.0020,0.0120],"qwen3.6-plus-2026-04-02":[0.0020,0.0120],'
         '"qwen-plus":[0.0008,0.0020],"qwen-plus-latest":[0.0008,0.0020],'
@@ -81,34 +78,6 @@ class Settings(BaseSettings):
         if "/compatible-mode/" in base:
             return base.replace("/compatible-mode/", "/api/", 1)
         return f"{base}/api/v1"
-
-    @staticmethod
-    def _split_csv(value: str) -> list[str]:
-        seen: set[str] = set()
-        items: list[str] = []
-        for raw in value.split(","):
-            item = raw.strip()
-            if not item or item in seen:
-                continue
-            seen.add(item)
-            items.append(item)
-        return items
-
-    @property
-    def dashscope_llm_models_list(self) -> list[str]:
-        items = self._split_csv(self.dashscope_llm_models)
-        return items or [self.dashscope_default_llm_model]
-
-    @property
-    def dashscope_corrector_models_list(self) -> list[str]:
-        items = self._split_csv(self.dashscope_corrector_models)
-        default = self.dashscope_default_corrector_model or self.dashscope_default_llm_model
-        return items or [default]
-
-    @property
-    def dashscope_asr_models_list(self) -> list[str]:
-        items = self._split_csv(self.dashscope_asr_models)
-        return items or [self.dashscope_default_asr_model]
 
     @staticmethod
     def _parse_json_mapping(raw: str) -> dict:

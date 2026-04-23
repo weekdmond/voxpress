@@ -61,7 +61,7 @@
 
 | 模块 | 文件 | 作用 |
 |---|---|---|
-| 配置 | [voxpress/config.py](/Users/auston/cowork/dy_docs/voxpress-api/voxpress/config.py) | 环境变量、并发、路径、DashScope 参数 |
+| 配置 | [voxpress/config.py](/Users/auston/cowork/dy_docs/voxpress-api/voxpress/config.py) / [voxpress/runtime_settings.py](/Users/auston/cowork/dy_docs/voxpress-api/voxpress/runtime_settings.py) | 环境变量兜底、数据库设置合并、DashScope/OSS 运行时凭证 |
 | 数据库 | [voxpress/db.py](/Users/auston/cowork/dy_docs/voxpress-api/voxpress/db.py) | async engine / session |
 | ORM | [voxpress/models.py](/Users/auston/cowork/dy_docs/voxpress-api/voxpress/models.py) | creators / videos / transcripts / articles / tasks / settings |
 | 任务存储 | [voxpress/task_store.py](/Users/auston/cowork/dy_docs/voxpress-api/voxpress/task_store.py) | claim、heartbeat、阶段推进、失败/完成 |
@@ -90,6 +90,8 @@
 配置表：
 
 - `settings`
+
+其中 `cookie`、`dashscope`、`oss` 等运行时配置都保存在 `settings`，环境变量只作为兜底来源。
 
 ## 6. 执行链路
 

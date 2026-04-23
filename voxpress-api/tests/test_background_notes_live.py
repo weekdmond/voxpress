@@ -8,6 +8,7 @@ import pytest
 
 from voxpress.config import settings
 from voxpress.pipeline.dashscope import DashScopeError, DashScopeLLM
+from voxpress.runtime_settings import load_dashscope_runtime_settings
 
 
 def _load_fixture() -> dict:
@@ -17,8 +18,14 @@ def _load_fixture() -> dict:
 
 @pytest.mark.live
 @pytest.mark.asyncio
-@pytest.mark.skipif(not settings.dashscope_api_key, reason="DashScope API key is not configured")
 async def test_background_notes_live_regression() -> None:
+    try:
+        runtime = await load_dashscope_runtime_settings()
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"DashScope runtime settings unavailable: {exc}")
+    if not runtime.enabled:
+        pytest.skip("DashScope API key is not configured")
+
     fixture = _load_fixture()
     llm = DashScopeLLM(model=settings.dashscope_default_llm_model)
 

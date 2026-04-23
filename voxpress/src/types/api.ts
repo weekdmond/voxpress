@@ -279,6 +279,11 @@ export interface Settings {
     last_tested_at: ISO8601 | null;
     source_name: string | null;
   };
+  dashscope: {
+    configured?: boolean;
+    base_url: string;
+    api_key?: string | null;
+  };
   storage: {
     audio_retain_days: number;
     used_bytes: number;

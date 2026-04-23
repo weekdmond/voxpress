@@ -11,18 +11,16 @@ from voxpress.db import get_session
 from voxpress.errors import CookieInvalid, CookieMissing, InvalidCookieFile
 from voxpress.creator_sync import fetch_creator_page
 from voxpress.models import Creator, SettingEntry, Video
-from voxpress.pipeline.dashscope import (
-    DEFAULT_ASR_MODELS,
-    DEFAULT_CORRECTOR_MODELS,
-    DEFAULT_LLM_MODELS,
-)
 from voxpress.pipeline.douyin_video import probe_video_access
 from voxpress.prompts import DEFAULT_CORRECTOR_TEMPLATE, DEFAULT_ORGANIZER_TEMPLATE, DEFAULT_PROMPT_VERSION
+from voxpress.runtime_settings import build_dashscope_runtime_settings, build_oss_runtime_settings
 from voxpress.schemas import (
     ArticleSettings,
     CookieSettings,
     CorrectorSettings,
+    DashScopeSettingsOut,
     LlmSettings,
+    OssSettingsOut,
     PromptSettings,
     SettingsOut,
     SettingsPatch,
@@ -32,6 +30,27 @@ from voxpress.schemas import (
 
 router = APIRouter(prefix="/api", tags=["settings"])
 _COOKIE_TEST_FALLBACK_SEC_UID = "MS4wLjABAAAAT4iFvoTOtlJCDuUMyovtft5NLQOnQZ-HECl7EGe-rT0"
+_RECOMMENDED_LLM_MODELS = (
+    "qwen3.6-plus",
+    "qwen3.6-plus-2026-04-02",
+    "qwen-plus",
+    "qwen-plus-latest",
+    "qwen-turbo",
+    "qwen-flash",
+    "qwen-max",
+    "qwen-max-latest",
+)
+_RECOMMENDED_CORRECTOR_MODELS = (
+    "qwen-turbo-latest",
+    "qwen-turbo",
+    "qwen-flash",
+    "qwen3.6-plus",
+    "qwen3.6-plus-2026-04-02",
+    "qwen-plus",
+)
+_RECOMMENDED_ASR_MODELS = (
+    "qwen3-asr-flash-filetrans",
+)
 
 
 _DEFAULTS: SettingsOut = SettingsOut(
@@ -41,6 +60,8 @@ _DEFAULTS: SettingsOut = SettingsOut(
     article=ArticleSettings(),
     prompt=PromptSettings(version=DEFAULT_PROMPT_VERSION, template=DEFAULT_ORGANIZER_TEMPLATE),
     cookie=CookieSettings(),
+    dashscope=DashScopeSettingsOut(),
+    oss=OssSettingsOut(),
     storage=StorageSettings(),
 )
 
@@ -50,14 +71,12 @@ async def _load(s: AsyncSession) -> SettingsOut:
     data: dict = _DEFAULTS.model_dump()
     for row in rows:
         if row.key in data:
-            value = dict(row.value)
-            if row.key == "cookie":
-                value.pop("text", None)
-            data[row.key] = {**data[row.key], **value}
+            data[row.key] = {**data[row.key], **dict(row.value)}
     return SettingsOut.model_validate(_normalize_settings_dict(data))
 
 
 async def _save(s: AsyncSession, key: str, value: dict) -> None:
+    value = _prepare_settings_value_for_storage(key, value)
     row = await s.get(SettingEntry, key)
     if row:
         row.value = value
@@ -75,19 +94,22 @@ async def patch_settings(
     payload: SettingsPatch, s: AsyncSession = Depends(get_session)
 ) -> SettingsOut:
     current = await _load(s)
-    merged = current.model_dump(mode="json")  # datetimes → ISO strings for JSONB
-    for key, value in payload.model_dump(exclude_none=True, mode="json").items():
+    merged = current.model_dump(mode="json")  # datetimes -> ISO strings for JSONB
+    updates = payload.model_dump(exclude_none=True, mode="json")
+    for key, value in updates.items():
         merged[key] = {**merged[key], **value}
     merged = _normalize_settings_dict(merged)
-    for k, v in merged.items():
-        # preserve any private fields (e.g. cookie.text) that _load() stripped
+    for k in updates:
+        v = dict(merged[k])
+        # Preserve secret fields that SettingsOut intentionally omits.
         existing = await s.get(SettingEntry, k)
         if existing:
             preserved = {pk: pv for pk, pv in existing.value.items() if pk not in v}
             v = {**v, **preserved}
+        merged[k] = v
         await _save(s, k, v)
     await s.commit()
-    return SettingsOut.model_validate(merged)
+    return await _load(s)
 
 
 @router.post("/cookie")
@@ -162,9 +184,9 @@ async def test_cookie(s: AsyncSession = Depends(get_session)) -> dict:
 @router.get("/models")
 async def list_models() -> dict:
     return {
-        "llm": DEFAULT_LLM_MODELS,
-        "corrector": DEFAULT_CORRECTOR_MODELS,
-        "transcribe": DEFAULT_ASR_MODELS,
+        "llm": list(_RECOMMENDED_LLM_MODELS),
+        "corrector": list(_RECOMMENDED_CORRECTOR_MODELS),
+        "transcribe": list(_RECOMMENDED_ASR_MODELS),
     }
 
 
@@ -174,15 +196,18 @@ def _normalize_settings_dict(data: dict) -> dict:
     llm = {**_DEFAULTS.llm.model_dump(), **dict(normalized.get("llm") or {})}
     llm["backend"] = "dashscope"
     llm_model = str(llm.get("model") or "").strip()
-    if not llm_model or ":" in llm_model:
+    if not llm_model:
         llm["model"] = _DEFAULTS.llm.model
-    elif llm_model not in app_settings.dashscope_llm_models_list:
-        llm["model"] = app_settings.dashscope_default_llm_model
+    else:
+        llm["model"] = llm_model
     normalized["llm"] = llm
 
     whisper = {**_DEFAULTS.whisper.model_dump(), **dict(normalized.get("whisper") or {})}
-    if whisper.get("model") not in DEFAULT_ASR_MODELS:
+    whisper_model = str(whisper.get("model") or "").strip()
+    if not whisper_model:
         whisper["model"] = _DEFAULTS.whisper.model
+    else:
+        whisper["model"] = whisper_model
     if whisper.get("language") not in {"zh", "auto"}:
         whisper["language"] = _DEFAULTS.whisper.language
     whisper["enable_initial_prompt"] = bool(whisper.get("enable_initial_prompt", True))
@@ -190,10 +215,10 @@ def _normalize_settings_dict(data: dict) -> dict:
 
     corrector = {**_DEFAULTS.corrector.model_dump(), **dict(normalized.get("corrector") or {})}
     corrector_model = str(corrector.get("model") or "").strip()
-    if not corrector_model or ":" in corrector_model:
+    if not corrector_model:
         corrector["model"] = _DEFAULTS.corrector.model
-    elif corrector_model not in DEFAULT_CORRECTOR_MODELS:
-        corrector["model"] = app_settings.dashscope_default_corrector_model
+    else:
+        corrector["model"] = corrector_model
     normalized["corrector"] = corrector
 
     article = {**_DEFAULTS.article.model_dump(), **dict(normalized.get("article") or {})}
@@ -205,9 +230,34 @@ def _normalize_settings_dict(data: dict) -> dict:
     cookie = {**_DEFAULTS.cookie.model_dump(mode="json"), **dict(normalized.get("cookie") or {})}
     normalized["cookie"] = cookie
 
+    dashscope = {**_DEFAULTS.dashscope.model_dump(), **dict(normalized.get("dashscope") or {})}
+    dashscope_runtime = build_dashscope_runtime_settings(dashscope)
+    dashscope["base_url"] = dashscope_runtime.chat_base_url
+    dashscope["configured"] = dashscope_runtime.enabled
+    normalized["dashscope"] = dashscope
+
+    oss = {**_DEFAULTS.oss.model_dump(), **dict(normalized.get("oss") or {})}
+    oss_runtime = build_oss_runtime_settings(oss)
+    oss["configured"] = oss_runtime.enabled
+    oss["region"] = oss_runtime.region or None
+    oss["endpoint"] = oss_runtime.endpoint or None
+    oss["bucket"] = oss_runtime.bucket or None
+    normalized["oss"] = oss
+
     storage = {**_DEFAULTS.storage.model_dump(), **dict(normalized.get("storage") or {})}
     normalized["storage"] = storage
     return normalized
+
+
+def _prepare_settings_value_for_storage(key: str, value: dict) -> dict:
+    raw = dict(value or {})
+    if key == "dashscope":
+        allowed = ("api_key", "base_url")
+        return {field: raw[field] for field in allowed if field in raw}
+    if key == "oss":
+        allowed = ("region", "endpoint", "bucket", "access_key_id", "access_key_secret")
+        return {field: raw[field] for field in allowed if field in raw}
+    return raw
 
 
 async def _pick_cookie_test_creator(s: AsyncSession) -> str:

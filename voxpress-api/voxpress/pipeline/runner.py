@@ -35,21 +35,27 @@ def _normalize_runtime_settings(key: str, value: dict | None) -> dict:
     if key == "llm":
         model = str(raw.get("model") or "").strip()
         raw["backend"] = "dashscope"
-        if not model or ":" in model or model not in app_settings.dashscope_llm_models_list:
+        if not model:
             raw["model"] = app_settings.dashscope_default_llm_model
+        else:
+            raw["model"] = model
         return raw
     if key == "whisper":
         model = str(raw.get("model") or "").strip()
-        if model not in app_settings.dashscope_asr_models_list:
+        if not model:
             raw["model"] = app_settings.dashscope_default_asr_model
+        else:
+            raw["model"] = model
         language = str(raw.get("language") or "zh")
         raw["language"] = language if language in {"zh", "auto"} else "zh"
         raw["enable_initial_prompt"] = bool(raw.get("enable_initial_prompt", True))
         return raw
     if key == "corrector":
         model = str(raw.get("model") or "").strip()
-        if not model or ":" in model or model not in app_settings.dashscope_corrector_models_list:
+        if not model:
             raw["model"] = app_settings.dashscope_default_corrector_model
+        else:
+            raw["model"] = model
         return raw
     return raw
 
@@ -193,11 +199,11 @@ class TaskRunner:
 
         app_settings.audio_dir.mkdir(parents=True, exist_ok=True)
         audio_path = app_settings.audio_dir / f"{ctx.video.id}.m4a"
-        if ctx.video.audio_object_key and media_store.enabled:
+        if ctx.video.audio_object_key and await media_store.is_enabled():
             await media_store.download_file(ctx.video.audio_object_key, path=audio_path)
             return audio_path
 
-        if ctx.video.media_object_key and media_store.enabled:
+        if ctx.video.media_object_key and await media_store.is_enabled():
             app_settings.video_dir.mkdir(parents=True, exist_ok=True)
             video_path = app_settings.video_dir / f"{ctx.video.id}.mp4"
             await media_store.download_file(ctx.video.media_object_key, path=video_path)
@@ -223,7 +229,7 @@ class TaskRunner:
     async def transcribe_inline(self, task_id: UUID) -> TranscriptResult:
         audio_path = await self.prepare_audio(task_id)
         ctx = await self._load_video_context(task_id)
-        if media_store.enabled and not ctx.video.audio_object_key and audio_path.exists():
+        if await media_store.is_enabled() and not ctx.video.audio_object_key and audio_path.exists():
             try:
                 object_key = await media_store.upload_file(
                     audio_path,
@@ -379,7 +385,7 @@ class TaskRunner:
         return await self._save_article(meta=meta, transcript=transcript, organized=organized)
 
     async def _archive_media(self, meta: ExtractorResult) -> None:
-        if not media_store.enabled:
+        if not await media_store.is_enabled():
             return
         if meta.video_path:
             try:
@@ -418,7 +424,7 @@ class TaskRunner:
         if local_audio is not None:
             return self._meta_from_cached_video(video=video, creator=creator, audio_path=local_audio)
 
-        if video.audio_object_key and media_store.enabled:
+        if video.audio_object_key and await media_store.is_enabled():
             app_settings.audio_dir.mkdir(parents=True, exist_ok=True)
             audio_suffix = (
                 video.audio_object_key.rsplit(".", 1)[-1] if "." in video.audio_object_key else "m4a"

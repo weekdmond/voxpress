@@ -33,7 +33,7 @@ async def proxy_media(url: str = Query(min_length=1)) -> Response:
     if not _is_allowed_host(parsed.hostname.lower()):
         raise InvalidUrl("当前只支持抖音图片地址")
 
-    if media_store.enabled:
+    if await media_store.is_enabled():
         try:
             object_key = await media_store.cache_remote_image(url)
             if object_key:

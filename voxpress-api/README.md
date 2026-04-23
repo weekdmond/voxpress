@@ -32,7 +32,23 @@ VOXPRESS_DASHSCOPE_API_KEY=sk-xxx
 VOXPRESS_DB_URL=postgresql+asyncpg://auston@localhost/voxpress
 ```
 
-如果要跑真实 ASR，还需要可用的 OSS 配置和抖音 Cookie。
+`VOXPRESS_DASHSCOPE_API_KEY` 和 OSS 相关环境变量现在主要作为兜底/冷启动配置。运行中推荐把 DashScope / OSS 凭证写到数据库 `settings` 表，通过 `PATCH /api/settings` 管理；抖音 Cookie 仍走 `/api/cookie` 上传。
+
+示例：
+
+```bash
+curl -X PATCH localhost:8787/api/settings \
+  -H 'content-type: application/json' \
+  -d '{
+    "dashscope":{"api_key":"sk-xxx"},
+    "oss":{
+      "region":"cn-hangzhou",
+      "bucket":"your-bucket",
+      "access_key_id":"LTAI...",
+      "access_key_secret":"secret"
+    }
+  }'
+```
 
 ## 验证
 

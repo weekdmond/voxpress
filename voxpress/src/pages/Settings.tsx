@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Page, PageHead } from '@/layouts/AppShell';
-import { Box, Button, Chip, Divider, Field, Row, Select, Textarea } from '@/components/primitives';
+import { Box, Button, Chip, Divider, Field, Input, Row, Select, Textarea } from '@/components/primitives';
 import { api } from '@/lib/api';
 import type { Settings as SettingsT } from '@/types/api';
 
@@ -54,10 +54,14 @@ export function SettingsPage() {
 
   const [promptDraft, setPromptDraft] = useState('');
   const [correctorDraft, setCorrectorDraft] = useState('');
+  const [dashscopeBaseUrlDraft, setDashscopeBaseUrlDraft] = useState('');
+  const [dashscopeApiKeyDraft, setDashscopeApiKeyDraft] = useState('');
   useEffect(() => {
     if (!settings) return;
     setPromptDraft(settings.prompt.template);
     setCorrectorDraft(settings.corrector.template);
+    setDashscopeBaseUrlDraft(settings.dashscope.base_url);
+    setDashscopeApiKeyDraft('');
   }, [settings]);
 
   const exportSettings = () => {
@@ -99,6 +103,16 @@ export function SettingsPage() {
     ) : (
       <Chip variant="warn">未导入</Chip>
     );
+  const dashscopeChip = settings.dashscope.configured ? (
+    <Chip variant="ok">已配置</Chip>
+  ) : (
+    <Chip variant="warn">未配置</Chip>
+  );
+  const dashscopeDirty =
+    dashscopeBaseUrlDraft !== settings.dashscope.base_url || dashscopeApiKeyDraft.trim().length > 0;
+  const llmModelSuggestions = Array.from(new Set([settings.llm.model, ...(models?.llm ?? [])]));
+  const whisperModelSuggestions = Array.from(new Set([settings.whisper.model, ...(models?.transcribe ?? [])]));
+  const correctorModelSuggestions = Array.from(new Set([settings.corrector.model, ...(models?.corrector ?? [])]));
 
   const checkboxStyle = {
     display: 'inline-flex',
@@ -140,12 +154,77 @@ export function SettingsPage() {
       <Box>
         <Row between>
           <div>
+            <strong style={{ fontSize: 14 }}>DashScope 连接</strong>
+            <div style={{ color: 'var(--vp-ink-3)', fontSize: 11.5 }}>
+              配置 API Key 和兼容接口 Base URL。已保存的密钥不会回显。
+            </div>
+          </div>
+          {dashscopeChip}
+        </Row>
+        <Divider />
+        <Field
+          label="API Key"
+          help={
+            settings.dashscope.configured
+              ? '当前已配置 DashScope 凭证；如需更换，输入新的 API Key 后保存'
+              : '请输入 DashScope API Key，保存后写入后端 settings 表'
+          }
+        >
+          <Input
+            type="password"
+            value={dashscopeApiKeyDraft}
+            placeholder={settings.dashscope.configured ? '已配置，留空表示保持不变' : 'sk-...'}
+            onChange={(e) => setDashscopeApiKeyDraft(e.target.value)}
+            mono
+          />
+        </Field>
+        <Field label="Base URL" help="默认使用 DashScope OpenAI 兼容接口地址">
+          <Input
+            value={dashscopeBaseUrlDraft}
+            onChange={(e) => setDashscopeBaseUrlDraft(e.target.value)}
+            placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
+            mono
+          />
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <Button
+              onClick={() => {
+                setDashscopeBaseUrlDraft(settings.dashscope.base_url);
+                setDashscopeApiKeyDraft('');
+              }}
+            >
+              恢复当前
+            </Button>
+            <Button
+              variant={dashscopeDirty ? 'primary' : 'default'}
+              disabled={!dashscopeDirty || patch.isPending}
+              onClick={() =>
+                patch.mutate({
+                  dashscope: {
+                    base_url: dashscopeBaseUrlDraft.trim(),
+                    ...(dashscopeApiKeyDraft.trim()
+                      ? { api_key: dashscopeApiKeyDraft.trim() }
+                      : {}),
+                  },
+                })
+              }
+            >
+              保存
+            </Button>
+          </div>
+        </Field>
+      </Box>
+
+      <Box>
+        <Row between>
+          <div>
             <strong style={{ fontSize: 14 }}>文章整理模型</strong>
             <div style={{ color: 'var(--vp-ink-3)', fontSize: 11.5 }}>
               通过 DashScope 兼容接口调用千问模型
             </div>
           </div>
-          <Chip variant="ok">DashScope · 已连接</Chip>
+          <Chip variant={settings.dashscope.configured ? 'ok' : 'warn'}>
+            {settings.dashscope.configured ? 'DashScope · 已连接' : 'DashScope · 未配置'}
+          </Chip>
         </Row>
         <Divider />
         <Field label="后端">
@@ -153,12 +232,19 @@ export function SettingsPage() {
             <option value="dashscope">DashScope (阿里云百炼)</option>
           </Select>
         </Field>
-        <Field label="模型" help="推荐 qwen3.6-plus；当前千问旗舰模型，整理质量更稳">
+        <Field label="模型" help="前端只提供推荐项选择；后端不会按白名单静默回退">
           <Select
             value={settings.llm.model}
-            onChange={(e) => patch.mutate({ llm: { ...settings.llm, model: e.target.value } })}
+            onChange={(e) =>
+              patch.mutate({
+                llm: {
+                  ...settings.llm,
+                  model: e.target.value,
+                },
+              })
+            }
           >
-            {(models?.llm ?? [settings.llm.model]).map((m) => (
+            {llmModelSuggestions.map((m) => (
               <option key={m} value={m}>
                 {m}
               </option>
@@ -195,10 +281,12 @@ export function SettingsPage() {
               Qwen3-ASR-Flash-Filetrans · 云端异步文件转写
             </div>
           </div>
-          <Chip variant="ok">DashScope · 已连接</Chip>
+          <Chip variant={settings.dashscope.configured ? 'ok' : 'warn'}>
+            {settings.dashscope.configured ? 'DashScope · 已连接' : 'DashScope · 未配置'}
+          </Chip>
         </Row>
         <Divider />
-        <Field label="模型" help="当前固定使用文件转写版本，返回句级时间戳">
+        <Field label="模型" help="前端只显示推荐 ASR 模型；真实可用性以运行时报错为准">
           <Select
             value={settings.whisper.model}
             onChange={(e) =>
@@ -210,7 +298,7 @@ export function SettingsPage() {
               })
             }
           >
-            {(models?.transcribe ?? [settings.whisper.model]).map((m) => (
+            {whisperModelSuggestions.map((m) => (
               <option key={m} value={m}>
                 {m}
               </option>
@@ -283,7 +371,7 @@ export function SettingsPage() {
             <span>{settings.corrector.enabled ? '自动运行 correct 阶段' : '跳过 correct 阶段'}</span>
           </label>
         </Field>
-        <Field label="纠错模型" help="推荐 qwen-turbo-latest；更适合做轻量纠错">
+        <Field label="纠错模型" help="前端只显示推荐项；若后端服务不支持，会在调用时返回错误">
           <Select
             value={settings.corrector.model}
             onChange={(e) =>
@@ -295,7 +383,7 @@ export function SettingsPage() {
               })
             }
           >
-            {(models?.corrector ?? [settings.corrector.model]).map((m) => (
+            {correctorModelSuggestions.map((m) => (
               <option key={m} value={m}>
                 {m}
               </option>

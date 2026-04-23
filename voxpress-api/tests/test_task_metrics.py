@@ -12,6 +12,17 @@ def test_llm_usage_from_dashscope_known_model() -> None:
     assert usage["cost_cny"] == 0.0250
 
 
+def test_llm_usage_from_dashscope_versioned_model() -> None:
+    usage = llm_usage_from_dashscope(
+        "qwen3.6-plus-2026-04-02",
+        {"prompt_tokens": 3500, "completion_tokens": 1500, "total_tokens": 5000},
+    )
+    assert usage["input_tokens"] == 3500
+    assert usage["output_tokens"] == 1500
+    assert usage["total_tokens"] == 5000
+    assert usage["cost_cny"] == 0.0250
+
+
 def test_llm_usage_from_dashscope_unknown_model_zero_cost() -> None:
     usage = llm_usage_from_dashscope("unknown-model", {"prompt_tokens": 120, "completion_tokens": 30})
     assert usage["input_tokens"] == 120
