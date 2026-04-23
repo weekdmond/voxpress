@@ -54,6 +54,7 @@ export interface Article {
   id: string;
   video_id: string;
   creator_id: number;
+  latest_task_id?: string | null;
   cover_url?: string | null;
   title: string;
   summary: string;

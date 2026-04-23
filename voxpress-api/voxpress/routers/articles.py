@@ -5,7 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import Response
-from sqlalchemy import func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -28,6 +28,22 @@ from voxpress.schemas import (
 router = APIRouter(prefix="/api/articles", tags=["articles"])
 
 
+def _latest_task_id_subquery(article_id_expr, video_id_expr):
+    article_match_score = case((Task.article_id == article_id_expr, 1), else_=0)
+    return (
+        select(Task.id)
+        .where(or_(Task.article_id == article_id_expr, Task.video_id == video_id_expr))
+        .order_by(
+            article_match_score.desc(),
+            Task.started_at.desc().nulls_last(),
+            Task.updated_at.desc().nulls_last(),
+            Task.id.desc(),
+        )
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
 @router.get("", response_model=Page[ArticleOut])
 async def list_articles(
     s: AsyncSession = Depends(get_session),
@@ -38,7 +54,8 @@ async def list_articles(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> Page[ArticleOut]:
-    stmt = select(Article)
+    latest_task_id = _latest_task_id_subquery(Article.id, Article.video_id).label("latest_task_id")
+    stmt = select(Article, latest_task_id)
     total_stmt = select(func.count()).select_from(Article)
     if q:
         like = f"%{q}%"
@@ -64,7 +81,9 @@ async def list_articles(
             total_stmt = total_stmt.where(predicate)
     stmt = stmt.order_by(Article.published_at.desc(), Article.id.desc()).offset(offset).limit(limit)
 
-    items = (await s.scalars(stmt)).all()
+    rows = (await s.execute(stmt)).all()
+    items = [article for article, _ in rows]
+    latest_task_map = {article.id: task_id for article, task_id in rows}
     video_ids = [article.video_id for article in items]
     article_ids = [article.id for article in items]
     if items:
@@ -87,6 +106,7 @@ async def list_articles(
         items=[
             ArticleOut.model_validate(a).model_copy(
                 update={
+                    "latest_task_id": latest_task_map.get(a.id),
                     "cover_url": video_map[a.video_id].cover_url if a.video_id in video_map else None,
                     "duration_sec": video_map[a.video_id].duration_sec if a.video_id in video_map else 0,
                     "cost_cny": cost_map.get(a.id, 0.0),
@@ -113,6 +133,17 @@ async def get_article(article_id: UUID, s: AsyncSession = Depends(get_session)) 
     creator = await s.get(Creator, art.creator_id)
     video = await s.get(Video, art.video_id)
     transcript = await s.get(Transcript, art.video_id)
+    latest_task_id = await s.scalar(
+        select(Task.id)
+        .where(or_(Task.article_id == art.id, Task.video_id == art.video_id))
+        .order_by(
+            case((Task.article_id == art.id, 1), else_=0).desc(),
+            Task.started_at.desc().nulls_last(),
+            Task.updated_at.desc().nulls_last(),
+            Task.id.desc(),
+        )
+        .limit(1)
+    )
     if not creator or not video:
         raise NotFound("article references missing creator/video")
 
@@ -139,6 +170,7 @@ async def get_article(article_id: UUID, s: AsyncSession = Depends(get_session)) 
         },
     )
     base = ArticleOut.model_validate(art).model_dump()
+    base["latest_task_id"] = latest_task_id
     base["cover_url"] = video.cover_url
     clean_md = strip_background_notes_md(base.get("content_md") or "")
     base["content_md"] = clean_md

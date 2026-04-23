@@ -32,7 +32,8 @@ class Settings(BaseSettings):
     dashscope_asr_models: str = "qwen3-asr-flash-filetrans"
     dashscope_chat_pricing: str = (
         '{"qwen3.6-plus":[0.0020,0.0120],"qwen3.6-plus-2026-04-02":[0.0020,0.0120],'
-        '"qwen-plus":[0.0008,0.0020],"qwen-plus-latest":[0.0008,0.0020],"qwen-turbo":[0.0003,0.0006]}'
+        '"qwen-plus":[0.0008,0.0020],"qwen-plus-latest":[0.0008,0.0020],'
+        '"qwen-turbo":[0.0003,0.0006],"qwen-max":[0.0024,0.0096],"qwen-max-latest":[0.0024,0.0096]}'
     )
     dashscope_asr_pricing: str = '{"qwen3-asr-flash-filetrans":0.00022}'
     dashscope_asr_poll_interval_sec: int = Field(default=2, ge=1, le=30)

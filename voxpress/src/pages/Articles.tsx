@@ -3,12 +3,20 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Page, PageHead } from '@/layouts/AppShell';
-import { Avatar, Icon } from '@/components/primitives';
+import { TaskDrawer } from '@/components/Task/TaskDrawer';
+import { Avatar, ConfirmDialog, Icon } from '@/components/primitives';
 import { api } from '@/lib/api';
 import { thumbGradient } from '@/lib/gradients';
 import { mediaCandidates } from '@/lib/media';
 import { formatCount, formatDate, formatDuration, formatRelative } from '@/lib/format';
-import type { Article, Creator, Page as ApiPage } from '@/types/api';
+import type {
+  Article,
+  Creator,
+  Page as ApiPage,
+  Task,
+  TaskCancelResult,
+  TaskRerunResult,
+} from '@/types/api';
 import s from './Articles.module.css';
 
 type TimeFilter = 'all' | '7d' | '30d' | '90d';
@@ -153,6 +161,8 @@ export function ArticlesPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [openDrop, setOpenDrop] = useState<string | null>(null);
   const [rebuildStage, setRebuildStage] = useState<RebuildStage>('auto');
+  const [taskDrawerId, setTaskDrawerId] = useState<string | null>(null);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   useEffect(() => {
     if (!openDrop) return;
@@ -241,6 +251,27 @@ export function ArticlesPage() {
       qc.invalidateQueries({ queryKey: ['articles'] });
     },
     onError: (e: Error) => toast.error(e.message || '删除失败'),
+  });
+
+  const rerunOne = useMutation({
+    mutationFn: ({ id, mode }: { id: string; mode: 'resume' | 'organize' | 'full' }) =>
+      api.post<TaskRerunResult>('/api/tasks/rerun', { task_ids: [id], mode }),
+    onSuccess: (res) => {
+      toast.success(`已创建 ${res.processed} 条重跑任务`);
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+      qc.invalidateQueries({ queryKey: ['articles'] });
+    },
+    onError: (e: Error) => toast.error(e.message || '重跑失败'),
+  });
+
+  const cancelOne = useMutation({
+    mutationFn: (id: string) => api.post<Task | TaskCancelResult>(`/api/tasks/${id}/cancel`),
+    onSuccess: () => {
+      toast.success('任务已取消');
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+      qc.invalidateQueries({ queryKey: ['articles'] });
+    },
+    onError: (e: Error) => toast.error(e.message || '取消失败'),
   });
 
   const exportOne = (id: string) => {
@@ -525,10 +556,14 @@ export function ArticlesPage() {
                   </span>
                   <button
                     className={s.rowAct}
-                    title="打开文章"
+                    title="查看任务"
                     onClick={(e) => {
                       e.stopPropagation();
-                      navigate(`/articles/${a.id}`);
+                      if (!a.latest_task_id) {
+                        toast.error('暂无关联任务记录');
+                        return;
+                      }
+                      setTaskDrawerId(a.latest_task_id);
                     }}
                   >
                     <Icon name="chevron" size={13} />
@@ -603,9 +638,7 @@ export function ArticlesPage() {
           <button
             className={[s.stickyGhost, s.stickyDanger].join(' ')}
             onClick={() => {
-              if (confirm(`确认删除 ${selCount} 篇文章?此操作不可撤销。`)) {
-                deleteMut.mutate(selectedIds);
-              }
+              setConfirmDeleteOpen(true);
             }}
             disabled={deleteMut.isPending}
           >
@@ -619,6 +652,31 @@ export function ArticlesPage() {
           </button>
         </div>
       ) : null}
+
+      {taskDrawerId ? (
+        <TaskDrawer
+          taskId={taskDrawerId}
+          onClose={() => setTaskDrawerId(null)}
+          onRerun={(id, mode) => rerunOne.mutate({ id, mode })}
+          onCancel={(id) => cancelOne.mutate(id)}
+        />
+      ) : null}
+
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        title={`确认删除 ${selCount} 篇文章？`}
+        description="删除后文章内容和关联的逐字稿分段会一起移除，这个操作不可撤销。"
+        confirmLabel="确认删除"
+        cancelLabel="取消"
+        pending={deleteMut.isPending}
+        onCancel={() => setConfirmDeleteOpen(false)}
+        onConfirm={() => {
+          deleteMut.mutate(selectedIds, {
+            onSuccess: () => setConfirmDeleteOpen(false),
+            onError: () => setConfirmDeleteOpen(false),
+          });
+        }}
+      />
     </Page>
   );
 }

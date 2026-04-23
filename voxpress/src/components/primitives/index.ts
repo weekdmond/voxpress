@@ -3,6 +3,8 @@ export type { AvatarProps } from './Avatar';
 export { Box, Row, Col, Divider } from './Box';
 export { Button } from './Button';
 export type { ButtonProps } from './Button';
+export { ConfirmDialog } from './ConfirmDialog';
+export type { ConfirmDialogProps } from './ConfirmDialog';
 export { Chip } from './Chip';
 export type { ChipProps, ChipVariant } from './Chip';
 export { Icon } from './Icon';

@@ -140,6 +140,7 @@ class ArticleOut(BaseModel):
     id: UUID
     video_id: str
     creator_id: int
+    latest_task_id: UUID | None = None
     cover_url: str | None = None
     title: str
     summary: str

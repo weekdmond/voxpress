@@ -1,0 +1,51 @@
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(4px);
+  z-index: 80;
+}
+
+.dialog {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(460px, calc(100vw - 32px));
+  background: var(--vp-panel);
+  border: 1px solid var(--vp-line);
+  border-radius: 20px;
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.24);
+  z-index: 81;
+  overflow: hidden;
+}
+
+.body {
+  padding: 24px 24px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--vp-ink);
+}
+
+.desc {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--vp-ink-2);
+}
+
+.content {
+  padding-top: 2px;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 0 24px 22px;
+}

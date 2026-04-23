@@ -541,7 +541,7 @@ def _organize_user_prompt(
 def _normalize_organized_payload(data: dict[str, Any], *, title_hint: str) -> dict[str, Any]:
     title = (data.get("title") or title_hint).strip()
     summary = (data.get("summary") or "").strip()
-    content_md = (data.get("content_md") or "").strip()
+    content_md = _normalize_markdown_output((data.get("content_md") or "").strip())
     tags = data.get("tags") or []
     if not isinstance(tags, list):
         tags = []
@@ -551,6 +551,30 @@ def _normalize_organized_payload(data: dict[str, Any], *, title_hint: str) -> di
         "content_md": content_md or f"# {title}\n\n> {summary}",
         "tags": [str(tag)[:16] for tag in tags[:4]],
     }
+
+
+def _normalize_markdown_output(content: str) -> str:
+    if not content:
+        return ""
+    normalized = content.replace("\r\n", "\n").replace("\r", "\n")
+    # Some models return markdown content with literal escape sequences like "\\n"
+    # inside JSON strings. Restore them before markdown rendering.
+    normalized = (
+        normalized.replace("\\\\n", "\n")
+        .replace("\\\\t", "    ")
+        .replace("\\n", "\n")
+        .replace("\\t", "    ")
+    )
+    normalized = (
+        normalized.replace("\\(", "(")
+        .replace("\\)", ")")
+        .replace("\\[", "[")
+        .replace("\\]", "]")
+    )
+    normalized = re.sub(r"(?m)^\\>\s*", "> ", normalized)
+    normalized = re.sub(r"(?m)(^> .+)\n(?!\n|> )", r"\1\n\n", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized.strip()
 
 
 def _raise_dashscope_http_error(response: httpx.Response, *, prefix: str) -> None:
