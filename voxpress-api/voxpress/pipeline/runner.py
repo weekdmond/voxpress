@@ -309,7 +309,7 @@ class TaskRunner:
             corrected = {
                 "corrected_text": transcript.raw_text,
                 "corrections": [],
-                "correction_status": "failed",
+                "correction_status": "skipped",
                 "corrector_model": corrector.model,
             }
         async with session_scope() as s:

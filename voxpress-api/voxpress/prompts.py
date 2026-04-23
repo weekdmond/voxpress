@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+DEFAULT_PROMPT_VERSION = "v1.1"
+
 
 DEFAULT_ORGANIZER_TEMPLATE = """你是一位资深中文编辑,擅长把口播视频整理成可读性强的长文。
 

@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from voxpress.config import settings as app_settings
+from voxpress.prompts import DEFAULT_PROMPT_VERSION
 
 # ─── Shared ─────────────────────────────────────────
 
@@ -381,7 +382,7 @@ class ArticleSettings(BaseModel):
 
 
 class PromptSettings(BaseModel):
-    version: str = "v1.0"
+    version: str = DEFAULT_PROMPT_VERSION
     template: str = ""
 
 

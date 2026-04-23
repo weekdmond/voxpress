@@ -1,15 +1,7 @@
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any
-
-import httpx
-
-from voxpress.config import settings
-from voxpress.prompts import DEFAULT_CORRECTOR_TEMPLATE
-
-logger = logging.getLogger(__name__)
 
 
 class CorrectionTooAggressive(ValueError):
@@ -81,79 +73,6 @@ def validate_correction_result(
         raise CorrectionTooAggressive(f"ratio={ratio:.3f}")
 
     return target, normalize_correction_changes(changes, original=original)
-
-
-class OllamaCorrector:
-    def __init__(self, *, model: str, template: str = "", base_url: str | None = None) -> None:
-        self.model = model
-        self.template = template or DEFAULT_CORRECTOR_TEMPLATE
-        self.base_url = (base_url or settings.llm_base_url).rstrip("/")
-
-    async def correct(
-        self,
-        *,
-        text: str,
-        title_hint: str,
-        creator_hint: str,
-    ) -> dict[str, Any]:
-        chunks = split_correction_chunks(text)
-        corrected_parts: list[str] = []
-        merged_changes: list[dict[str, str]] = []
-
-        for chunk in chunks:
-            payload = await self._correct_chunk(chunk, title_hint=title_hint, creator_hint=creator_hint)
-            corrected, changes = validate_correction_result(
-                chunk,
-                str(payload.get("corrected") or chunk),
-                payload.get("changes") or [],
-            )
-            corrected_parts.append(corrected)
-            merged_changes.extend(changes)
-
-        return {
-            "corrected_text": "\n".join(part for part in corrected_parts if part).strip(),
-            "corrections": merged_changes,
-            "correction_status": "ok",
-            "corrector_model": self.model,
-        }
-
-    async def _correct_chunk(
-        self,
-        chunk: str,
-        *,
-        title_hint: str,
-        creator_hint: str,
-    ) -> dict[str, Any]:
-        user = (
-            "视频上下文（仅供理解语境，不要抄进输出）：\n"
-            f"标题：{title_hint}\n"
-            f"博主：{creator_hint}\n\n"
-            "需要校对的转写文本：\n"
-            f"{chunk}\n\n"
-            "只输出 JSON，不要任何解释。"
-        )
-        async with httpx.AsyncClient(timeout=300.0, trust_env=False) as client:
-            response = await client.post(
-                f"{self.base_url}/api/chat",
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": self.template},
-                        {"role": "user", "content": user},
-                    ],
-                    "format": "json",
-                    "stream": False,
-                    "options": {"temperature": 0.1, "num_ctx": 8192},
-                },
-            )
-            response.raise_for_status()
-            payload = response.json()
-
-        raw = str(payload.get("message", {}).get("content", "")).strip()
-        data = _loose_json(raw)
-        if not data:
-            logger.warning("corrector returned empty payload (first 200 chars): %s", raw[:200])
-        return data
 
 
 def _loose_json(raw: str) -> dict[str, Any]:

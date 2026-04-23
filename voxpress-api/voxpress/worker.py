@@ -29,6 +29,7 @@ from voxpress.task_store import (
 from voxpress.task_metrics import asr_usage
 
 logger = logging.getLogger(__name__)
+_DYNAMIC_LLM_CONCURRENCY_MAX = 20
 
 
 class LeaseLost(RuntimeError):
@@ -43,7 +44,7 @@ class StageSpec:
 
 class StageConcurrencyResolver:
     def __init__(self) -> None:
-        self._cached_llm_limit = settings.organize_concurrency
+        self._cached_llm_override: int | None = None
         self._checked_at = 0.0
 
     async def get(self, stage: str, fallback: int) -> int:
@@ -51,16 +52,21 @@ class StageConcurrencyResolver:
             return fallback
         now = time.monotonic()
         if now - self._checked_at < 2.0:
-            return max(1, min(fallback, self._cached_llm_limit))
+            return self._resolve_limit(fallback)
         async with session_scope() as s:
             row = await s.get(SettingEntry, "llm")
         value = (row.value or {}).get("concurrency") if row else None
-        limit = fallback
         if isinstance(value, int):
-            limit = max(1, min(fallback, value))
-        self._cached_llm_limit = limit
+            self._cached_llm_override = max(1, min(_DYNAMIC_LLM_CONCURRENCY_MAX, value))
+        else:
+            self._cached_llm_override = None
         self._checked_at = now
-        return limit
+        return self._resolve_limit(fallback)
+
+    def _resolve_limit(self, fallback: int) -> int:
+        if isinstance(self._cached_llm_override, int):
+            return self._cached_llm_override
+        return fallback
 
 
 class LeaseHeartbeater:
@@ -233,7 +239,7 @@ async def _process_correct(task_id: UUID, lease_owner: str) -> None:
         detail=(
             f"纠错完成 · {len(corrections)} 处修正"
             if status == "ok"
-            else "纠错失败 · 已降级原稿"
+            else "纠错跳过 · 已降级原稿"
         ),
         error=None if status in {"ok", "skipped"} else "已降级使用原始逐字稿",
         input_tokens=int(usage.get("input_tokens") or 0),
@@ -249,7 +255,7 @@ async def _process_correct(task_id: UUID, lease_owner: str) -> None:
         detail=(
             f"纠错完成 · {len(corrections)} 处修正"
             if status == "ok"
-            else "纠错失败 · 已降级原稿"
+            else "纠错跳过 · 已降级原稿"
         ),
     )
 

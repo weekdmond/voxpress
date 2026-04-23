@@ -195,10 +195,19 @@ class DashScopeLLM(LLMBackend):
 
 
 class DashScopeCorrector:
-    def __init__(self, *, model: str, template: str = "") -> None:
+    def __init__(
+        self,
+        *,
+        model: str,
+        template: str = "",
+        max_attempts: int = 3,
+        retry_base_delay_sec: float = 1.0,
+    ) -> None:
         self.model = model
         self.template = template or DEFAULT_CORRECTOR_TEMPLATE
         self.client = DashScopeChatClient()
+        self.max_attempts = max(1, max_attempts)
+        self.retry_base_delay_sec = max(0.0, retry_base_delay_sec)
 
     async def correct(
         self,
@@ -240,16 +249,32 @@ class DashScopeCorrector:
             f"{chunk}\n\n"
             "只输出 JSON，不要任何解释。"
         )
-        result = await self.client.chat_json_result(
-            model=self.model,
-            system=self.template,
-            user=user,
-            temperature=0.1,
-            timeout_sec=300.0,
-        )
-        payload = dict(result.data)
-        payload["_usage"] = result.usage
-        return payload
+        for attempt in range(1, self.max_attempts + 1):
+            try:
+                result = await self.client.chat_json_result(
+                    model=self.model,
+                    system=self.template,
+                    user=user,
+                    temperature=0.1,
+                    timeout_sec=300.0,
+                )
+            except Exception as exc:
+                if attempt >= self.max_attempts or not _is_retryable_corrector_error(exc):
+                    raise
+                delay = self.retry_base_delay_sec * (2 ** (attempt - 1))
+                logger.warning(
+                    "corrector request failed (attempt %s/%s), retrying in %.1fs: %s",
+                    attempt,
+                    self.max_attempts,
+                    delay,
+                    exc,
+                )
+                await asyncio.sleep(delay)
+                continue
+            payload = dict(result.data)
+            payload["_usage"] = result.usage
+            return payload
+        raise AssertionError("unreachable")
 
 
 class DashScopeFileTranscriber(Transcriber):
@@ -581,6 +606,25 @@ def _raise_dashscope_http_error(response: httpx.Response, *, prefix: str) -> Non
     if response.is_error:
         detail = response.text.strip().replace("\n", " ")
         raise DashScopeError(f"{prefix}: HTTP {response.status_code} {detail[:400]}")
+
+
+def _is_retryable_corrector_error(exc: Exception) -> bool:
+    if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError, httpx.TransportError)):
+        return True
+    if isinstance(exc, DashScopeError):
+        message = str(exc)
+        return any(
+            code in message
+            for code in (
+                "HTTP 408",
+                "HTTP 429",
+                "HTTP 500",
+                "HTTP 502",
+                "HTTP 503",
+                "HTTP 504",
+            )
+        )
+    return False
 
 
 def _parse_asr_result(payload: dict[str, Any]) -> TranscriptResult:

@@ -21,7 +21,6 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8787
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
-    llm_base_url: str = "http://localhost:11434"
     dashscope_api_key: str | None = None
     dashscope_compatible_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     dashscope_default_llm_model: str = "qwen3.6-plus"

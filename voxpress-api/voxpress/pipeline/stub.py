@@ -52,7 +52,7 @@ class StubTranscriber(Transcriber):
         await asyncio.sleep(1.2)
         segments = [
             (0, "这是占位逐字稿第一段。"),
-            (18, "接入真实 whisper 后会替换为实际音频转写。"),
+            (18, "接入真实 DashScope ASR 后会替换为实际音频转写。"),
             (42, "第三段内容由 stub 提供。"),
             (78, "系统整体流程已经打通,只差真实后端。"),
         ]

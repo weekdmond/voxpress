@@ -17,7 +17,7 @@ from voxpress.pipeline.dashscope import (
     DEFAULT_LLM_MODELS,
 )
 from voxpress.pipeline.douyin_video import probe_video_access
-from voxpress.prompts import DEFAULT_CORRECTOR_TEMPLATE, DEFAULT_ORGANIZER_TEMPLATE
+from voxpress.prompts import DEFAULT_CORRECTOR_TEMPLATE, DEFAULT_ORGANIZER_TEMPLATE, DEFAULT_PROMPT_VERSION
 from voxpress.schemas import (
     ArticleSettings,
     CookieSettings,
@@ -39,7 +39,7 @@ _DEFAULTS: SettingsOut = SettingsOut(
     whisper=WhisperSettings(),
     corrector=CorrectorSettings(template=DEFAULT_CORRECTOR_TEMPLATE),
     article=ArticleSettings(),
-    prompt=PromptSettings(template=DEFAULT_ORGANIZER_TEMPLATE),
+    prompt=PromptSettings(version=DEFAULT_PROMPT_VERSION, template=DEFAULT_ORGANIZER_TEMPLATE),
     cookie=CookieSettings(),
     storage=StorageSettings(),
 )
