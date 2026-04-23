@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
 
 type RebuildStage = 'auto' | 'download' | 'transcribe' | 'correct' | 'organize';
 const REBUILD_STAGE_OPTIONS: { v: RebuildStage; label: string }[] = [
@@ -8,7 +9,6 @@ const REBUILD_STAGE_OPTIONS: { v: RebuildStage; label: string }[] = [
   { v: 'correct', label: '从校对' },
   { v: 'organize', label: '从整理' },
 ];
-import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Page } from '@/layouts/AppShell';
