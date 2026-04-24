@@ -19,6 +19,8 @@ type ResolveResult =
       name?: string;
       video_count?: number;
       fetched_video_count?: number;
+      backfill_started?: boolean;
+      backfill_run_id?: string | null;
     };
 
 function lookValidDouyin(url: string): boolean {
@@ -84,8 +86,9 @@ export function HomePage() {
         const total = res.video_count ?? fetched;
         const summary =
           total !== fetched ? `已入库 ${fetched} 条；主页标注 ${total} 条` : `已入库 ${fetched} 条`;
+        const backfill = res.backfill_started ? '；后台补齐已启动' : '';
         toast.success(
-          `已抓取博主「${res.name ?? '未命名'}」的视频列表：${summary}`,
+          `已抓取博主「${res.name ?? '未命名'}」的视频列表：${summary}${backfill}`,
           { duration: 6000 },
         );
         qc.invalidateQueries({ queryKey: ['creators'] });

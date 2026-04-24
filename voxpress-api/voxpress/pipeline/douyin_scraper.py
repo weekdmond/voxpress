@@ -11,6 +11,7 @@ Requires a real browser cookie — Douyin rejects unsigned-in requests (empty
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -208,7 +209,7 @@ def _iter_awemes(page: Any) -> list[ScrapedVideo]:
             # work types. Skip them here so the import list only contains real
             # playable videos that the downstream audio pipeline can handle.
             continue
-        title = str(aweme.get("desc") or "").strip() or f"视频 {aid_s[-8:]}"
+        title = _pick_aweme_title(aweme, fallback=_fallback_aweme_title(aweme, aid_s))
         stats = aweme.get("statistics") or {}
         dur_ms = video.get("duration") or aweme.get("duration") or 0
         try:
@@ -233,6 +234,101 @@ def _iter_awemes(page: Any) -> list[ScrapedVideo]:
             )
         )
     return out
+
+
+_TITLE_KEYS = ("desc", "caption", "item_title", "preview_title")
+_GENERIC_CHAPTER_TITLES = {"引言", "开场", "片头", "结语", "总结", "片尾"}
+
+
+def _pick_aweme_title(aweme: dict[str, Any], *, fallback: str) -> str:
+    for key in _TITLE_KEYS:
+        title = _clean_title_text(aweme.get(key))
+        if title:
+            return _truncate_title(title)
+
+    chapter_info = aweme.get("recommend_chapter_info")
+    if isinstance(chapter_info, dict):
+        abstract = _clean_title_text(chapter_info.get("chapter_abstract"))
+        if abstract:
+            return _truncate_title(_first_sentence(abstract))
+
+        chapters = chapter_info.get("recommend_chapter_list")
+        if isinstance(chapters, list):
+            for chapter in chapters:
+                if not isinstance(chapter, dict):
+                    continue
+                title = _clean_title_text(chapter.get("desc"))
+                if title and title not in _GENERIC_CHAPTER_TITLES:
+                    return _truncate_title(title)
+
+    suggested_title = _pick_suggested_title(aweme)
+    if suggested_title:
+        return _truncate_title(suggested_title)
+
+    return fallback
+
+
+def _fallback_aweme_title(aweme: dict[str, Any], aweme_id: str) -> str:
+    published_ts = _parse_f2_create_time(aweme.get("create_time"))
+    if published_ts:
+        from datetime import datetime
+
+        published_day = datetime.fromtimestamp(published_ts).strftime("%Y-%m-%d")
+        return f"{published_day} 作品 {aweme_id[-4:]}"
+    return f"视频 {aweme_id[-8:]}"
+
+
+def _pick_suggested_title(aweme: dict[str, Any]) -> str:
+    suggest_words = aweme.get("suggest_words")
+    if not isinstance(suggest_words, dict):
+        return ""
+    groups = suggest_words.get("suggest_words")
+    if not isinstance(groups, list):
+        return ""
+    seen: set[str] = set()
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        words = group.get("words")
+        if not isinstance(words, list):
+            continue
+        for item in words:
+            if not isinstance(item, dict):
+                continue
+            word = _clean_suggested_word(item.get("word"))
+            if not word or word in seen:
+                continue
+            seen.add(word)
+            return word
+    return ""
+
+
+def _clean_suggested_word(value: Any) -> str:
+    word = _clean_title_text(value)
+    if len(word) <= 1 or not re.search(r"[\w\u4e00-\u9fff]", word):
+        return ""
+    return word
+
+
+def _clean_title_text(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    text = re.sub(r"\s+", " ", value).strip().strip("#＃")
+    if not re.search(r"[\w\u4e00-\u9fff]", text):
+        return ""
+    return text
+
+
+def _first_sentence(text: str) -> str:
+    sentence = re.split(r"[。！？!?；;]", text, maxsplit=1)[0].strip()
+    return sentence or text
+
+
+def _truncate_title(text: str, limit: int = 56) -> str:
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip("，、,;；。.!！?？ ") + "..."
 
 
 def _parse_f2_create_time(v: Any) -> int:

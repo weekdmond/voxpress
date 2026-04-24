@@ -335,7 +335,7 @@ class SystemJobRun(Base):
             name="ck_system_job_runs_status",
         ),
         CheckConstraint(
-            "trigger_kind IN ('scheduled','manual')",
+            "trigger_kind IN ('scheduled','manual','auto')",
             name="ck_system_job_runs_trigger_kind",
         ),
         Index("idx_system_job_runs_status", "status", "started_at"),

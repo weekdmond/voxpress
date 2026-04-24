@@ -14,7 +14,9 @@ from voxpress.pipeline.douyin_scraper import (
     _f2_conf,
     _format_f2_error,
     _normalize_cookie,
+    _fallback_aweme_title,
     _parse_f2_create_time,
+    _pick_aweme_title,
     _pick_cover,
 )
 from voxpress.pipeline.protocols import Extractor, ExtractorResult
@@ -39,7 +41,7 @@ async def probe_video_access(
     video_id, canonical_url = await _resolve_video_identity(url)
     detail = await _fetch_video_detail(video_id, cookie_text)
     aweme = _aweme_from_detail(detail)
-    title = str(aweme.get("desc") or video_id).strip() or video_id
+    title = _pick_aweme_title(aweme, fallback=_fallback_aweme_title(aweme, video_id))
     media_urls = _candidate_media_urls(detail, aweme)
     if not media_urls:
         raise RuntimeError("抖音返回了视频详情，但没有可用的播放地址。")
@@ -294,7 +296,7 @@ def _build_result(
     author = aweme.get("author") or {}
     stats = aweme.get("statistics") or {}
     video = aweme.get("video") or {}
-    title = str(aweme.get("desc") or "").strip() or video_id
+    title = _pick_aweme_title(aweme, fallback=_fallback_aweme_title(aweme, video_id))
     handle = _derive_handle(author)
     duration_ms = video.get("duration") or aweme.get("duration") or 0
     try:

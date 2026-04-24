@@ -188,6 +188,31 @@
   background: var(--vp-bg-2);
   color: var(--vp-ink);
 }
+.chipButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: var(--vp-radius-full);
+  border: 1px solid var(--vp-line);
+  background: var(--vp-panel);
+  color: var(--vp-ink-2);
+  font-family: var(--vp-font-mono);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 120ms var(--vp-ease), color 120ms var(--vp-ease),
+    border-color 120ms var(--vp-ease);
+}
+.chipButton:hover:not(:disabled) {
+  background: var(--vp-bg-2);
+  color: var(--vp-ink);
+  border-color: var(--vp-line-strong);
+}
+.chipButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .vidExtBtn {
   display: inline-flex;
   align-items: center;

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import Text, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from voxpress.creator_backfill import CreatorBackfillNotFound, start_creator_backfill_run
 from voxpress.creator_refresh import start_creator_refresh_run
 from voxpress.db import get_session
 from voxpress.errors import ApiError
@@ -61,6 +62,8 @@ def _job_filters(*, status: str | None, time_range: str | None, q: str | None) -
 def _job_name_for_key(job_key: str) -> str:
     if job_key == "creator_refresh":
         return "博主定时刷新"
+    if job_key == "creator_backfill":
+        return "博主作品补齐"
     raise ApiError("暂不支持该系统任务", code="unsupported_system_job", status_code=404)
 
 
@@ -192,7 +195,11 @@ async def system_jobs_summary(
 
 
 @router.post("/{job_key}/run", response_model=SystemJobRunOut)
-async def run_system_job(job_key: str, s: AsyncSession = Depends(get_session)) -> SystemJobRunOut:
+async def run_system_job(
+    job_key: str,
+    creator_id: int | None = Query(None),
+    s: AsyncSession = Depends(get_session),
+) -> SystemJobRunOut:
     _job_name_for_key(job_key)
     running = await s.scalar(
         select(SystemJobRun)
@@ -206,6 +213,19 @@ async def run_system_job(job_key: str, s: AsyncSession = Depends(get_session)) -
     if job_key == "creator_refresh":
         try:
             run_id = await start_creator_refresh_run(trigger_kind="manual", background=True)
+        except SystemJobAlreadyRunning:
+            await _raise_running_job_error(s, job_key)
+    elif job_key == "creator_backfill":
+        if creator_id is None:
+            raise ApiError("补齐博主作品需要 creator_id", code="creator_id_required", status_code=400)
+        try:
+            run_id = await start_creator_backfill_run(
+                creator_id=creator_id,
+                trigger_kind="manual",
+                background=True,
+            )
+        except CreatorBackfillNotFound as e:
+            raise ApiError("博主不存在", code="creator_not_found", status_code=404) from e
         except SystemJobAlreadyRunning:
             await _raise_running_job_error(s, job_key)
     else:

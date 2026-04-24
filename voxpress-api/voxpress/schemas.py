@@ -344,7 +344,7 @@ class SystemJobRunOut(BaseModel):
     id: UUID
     job_key: str
     job_name: str
-    trigger_kind: Literal["scheduled", "manual"] = "scheduled"
+    trigger_kind: Literal["scheduled", "manual", "auto"] = "scheduled"
     status: SystemJobStatus
     scope: str | None = None
     detail: str | None = None

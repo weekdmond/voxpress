@@ -319,6 +319,30 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
     return delay('任务 ID,状态,阶段,文章标题,博主,触发方式,开始,结束,耗时(ms),tokens,成本(¥),错误信息\n');
   }
 
+  if (method === 'POST' && path === '/api/system-jobs/creator_backfill/run') {
+    const creatorId = Number(params.get('creator_id') ?? 0);
+    const creator = creators.find((item) => item.id === creatorId) ?? creators[0];
+    const now = new Date().toISOString();
+    return delay({
+      id: `sj_${Math.random().toString(36).slice(2, 8)}`,
+      job_key: 'creator_backfill',
+      job_name: '博主作品补齐',
+      trigger_kind: 'manual',
+      status: 'running',
+      scope: `${creator.name} · 全量作品`,
+      detail: '手动补齐博主作品',
+      error: null,
+      total_items: creator.video_count,
+      processed_items: 0,
+      failed_items: 0,
+      skipped_items: 0,
+      duration_ms: null,
+      started_at: now,
+      updated_at: now,
+      finished_at: null,
+    });
+  }
+
   // Settings
   if (method === 'GET' && path === '/api/settings') return delay(settings);
   if (method === 'PATCH' && path === '/api/settings') {

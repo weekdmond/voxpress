@@ -162,7 +162,9 @@ function systemStageLabel(status: SystemJobStatus): string {
 }
 
 function systemTriggerLabel(kind: SystemJobRun['trigger_kind']): string {
-  return kind === 'manual' ? '手动执行' : '定时执行';
+  if (kind === 'manual') return '手动执行';
+  if (kind === 'auto') return '自动触发';
+  return '定时执行';
 }
 
 interface DropdownProps {

@@ -8,7 +8,14 @@ import { Avatar, Icon } from '@/components/primitives';
 import { api } from '@/lib/api';
 import { formatCount, formatDate, formatDateTime, formatDuration } from '@/lib/format';
 import { mediaCandidates } from '@/lib/media';
-import type { Creator, Page as ApiPage, TaskBatchResult, Video, VideoSummary } from '@/types/api';
+import type {
+  Creator,
+  Page as ApiPage,
+  SystemJobRun,
+  TaskBatchResult,
+  Video,
+  VideoSummary,
+} from '@/types/api';
 import s from './Import.module.css';
 
 type StatusFilter = 'all' | 'organized' | 'pending';
@@ -240,8 +247,10 @@ export function ImportPage() {
     if (page !== pageClamped) setPage(pageClamped);
   }, [page, pageClamped]);
   const totalVideos = overallSummary?.total ?? creator?.video_count ?? listTotal;
+  const storedVideoCount = overallSummary?.total ?? listTotal;
   const organizedCount = overallSummary?.organized ?? creator?.article_count ?? 0;
   const pendingCount = overallSummary?.pending ?? Math.max(0, totalVideos - organizedCount);
+  const backfillMissingCount = Math.max(0, (creator?.video_count ?? 0) - storedVideoCount);
   const filteredTotalVideos = filteredSummary?.total ?? listTotal;
   const filteredOrganizedCount = filteredSummary?.organized ?? 0;
   const filteredPendingCount =
@@ -266,6 +275,16 @@ export function ImportPage() {
       navigate('/tasks');
     },
     onError: (err: Error) => toast.error(err.message || '提交失败'),
+  });
+
+  const backfillMut = useMutation({
+    mutationFn: () =>
+      api.post<SystemJobRun>(`/api/system-jobs/creator_backfill/run?creator_id=${idNum}`),
+    onSuccess: () => {
+      toast.success('已启动后台补齐作品');
+      qc.invalidateQueries({ queryKey: ['system-jobs'] });
+    },
+    onError: (err: Error) => toast.error(err.message || '启动补齐失败'),
   });
 
   const clearAll = () => {
@@ -368,6 +387,19 @@ export function ImportPage() {
                   在抖音查看
                 </a>
               ) : null}
+              <button
+                className={s.chipButton}
+                disabled={backfillMut.isPending}
+                onClick={() => backfillMut.mutate()}
+                title="后台抓取这个博主尚未入库的作品"
+              >
+                <Icon name="refresh" size={11} />
+                {backfillMut.isPending
+                  ? '启动中'
+                  : backfillMissingCount > 0
+                    ? `补齐作品 ${formatCount(backfillMissingCount)}`
+                    : '重新补齐'}
+              </button>
             </div>
             <div className={s.creatorMeta}>
               <span>{creator.handle}</span>

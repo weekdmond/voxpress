@@ -232,7 +232,7 @@ export interface SystemJobRun {
   id: string;
   job_key: string;
   job_name: string;
-  trigger_kind: 'scheduled' | 'manual';
+  trigger_kind: 'scheduled' | 'manual' | 'auto';
   status: SystemJobStatus;
   scope: string | null;
   detail: string | null;
