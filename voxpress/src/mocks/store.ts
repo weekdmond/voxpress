@@ -22,6 +22,7 @@ function makeTask(partial: Partial<Task> & { id: string; source_url: string }): 
     detail: partial.detail ?? null,
     article_id: null,
     article_title: partial.article_title ?? null,
+    duration_sec: partial.duration_sec ?? 0,
     cover_url: partial.cover_url ?? null,
     error: null,
     trigger_kind: partial.trigger_kind ?? 'manual',

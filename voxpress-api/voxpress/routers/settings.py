@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from voxpress.config import settings as app_settings
 from voxpress.db import get_session
 from voxpress.errors import CookieInvalid, CookieMissing, InvalidCookieFile
 from voxpress.creator_sync import fetch_creator_page

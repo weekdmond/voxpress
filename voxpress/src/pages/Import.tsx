@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Page, PageHead } from '@/layouts/AppShell';
+import { useCrossPageSelection } from '@/hooks/useCrossPageSelection';
 import { Avatar, Icon } from '@/components/primitives';
 import { api } from '@/lib/api';
 import { formatCount, formatDate, formatDateTime, formatDuration } from '@/lib/format';
@@ -154,7 +155,6 @@ export function ImportPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
 
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<StatusFilter>('all');
   const [dur, setDur] = useState<DurFilter>('all');
   const [hot, setHot] = useState<HotFilter>('all');
@@ -171,13 +171,8 @@ export function ImportPage() {
   }, [openDrop]);
 
   useEffect(() => {
-    setSelected(new Set());
     setPage(1);
   }, [status, dur, hot, time, q]);
-
-  useEffect(() => {
-    setSelected(new Set());
-  }, [page]);
 
   const { data: creator } = useQuery({
     queryKey: ['creator', idNum],
@@ -210,12 +205,18 @@ export function ImportPage() {
     return p.toString();
   }, [minDur, minLikes, sinceDays, q]);
 
-  const { data: videosSummary } = useQuery({
+  const { data: filteredSummary } = useQuery({
     queryKey: ['videos', 'summary', idNum, summaryParams],
     queryFn: () =>
       api.get<VideoSummary>(
         `/api/creators/${idNum}/videos/summary${summaryParams ? `?${summaryParams}` : ''}`,
       ),
+    enabled: !isNaN(idNum),
+  });
+
+  const { data: overallSummary } = useQuery({
+    queryKey: ['videos', 'summary', idNum, 'overall'],
+    queryFn: () => api.get<VideoSummary>(`/api/creators/${idNum}/videos/summary`),
     enabled: !isNaN(idNum),
   });
 
@@ -229,46 +230,34 @@ export function ImportPage() {
   const pagedVideos = videosPage?.items ?? [];
   const listTotal = videosPage?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(listTotal / PAGE_SIZE));
+  const selectionScope = useMemo(
+    () => JSON.stringify({ creatorId, status, dur, hot, time, q }),
+    [creatorId, status, dur, hot, time, q],
+  );
+  const selection = useCrossPageSelection(selectionScope, pagedVideos);
   const pageClamped = Math.min(page, totalPages);
   useEffect(() => {
     if (page !== pageClamped) setPage(pageClamped);
   }, [page, pageClamped]);
-  const totalVideos = videosSummary?.total ?? listTotal;
-  const organizedCount = videosSummary?.organized ?? 0;
-  const pendingCount = videosSummary?.pending ?? Math.max(0, totalVideos - organizedCount);
+  const totalVideos = overallSummary?.total ?? creator?.video_count ?? listTotal;
+  const organizedCount = overallSummary?.organized ?? creator?.article_count ?? 0;
+  const pendingCount = overallSummary?.pending ?? Math.max(0, totalVideos - organizedCount);
+  const filteredTotalVideos = filteredSummary?.total ?? listTotal;
+  const filteredOrganizedCount = filteredSummary?.organized ?? 0;
+  const filteredPendingCount =
+    filteredSummary?.pending ?? Math.max(0, filteredTotalVideos - filteredOrganizedCount);
 
   const allCbxCls =
-    selected.size === 0
+    !selection.someOnPageSelected
       ? s.cbx
-      : selected.size === pagedVideos.length && pagedVideos.length > 0
+      : selection.allOnPageSelected
       ? [s.cbx, s.cbxOn].join(' ')
       : [s.cbx, s.cbxIndet].join(' ');
-
-  const toggleOne = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-  const toggleAll = () => {
-    setSelected((prev) => {
-      if (pagedVideos.length > 0 && pagedVideos.every((v) => prev.has(v.id))) {
-        const n = new Set(prev);
-        pagedVideos.forEach((v) => n.delete(v.id));
-        return n;
-      }
-      const n = new Set(prev);
-      pagedVideos.forEach((v) => n.add(v.id));
-      return n;
-    });
-  };
 
   const submit = useMutation({
     mutationFn: () =>
       api.post<TaskBatchResult>('/api/tasks/batch', {
-        video_ids: Array.from(selected),
+        video_ids: selection.selectedIds,
         creator_id: idNum,
       }),
     onSuccess: (r) => {
@@ -326,7 +315,7 @@ export function ImportPage() {
       : []),
   ];
 
-  const selCount = selected.size;
+  const selCount = selection.selectedCount;
 
   return (
     <Page>
@@ -431,9 +420,9 @@ export function ImportPage() {
           k="状态"
           value={status}
           options={[
-            { v: 'all', label: '全部', count: totalVideos },
-            { v: 'organized', label: '已转文章', count: organizedCount },
-            { v: 'pending', label: '待处理', count: pendingCount },
+            { v: 'all', label: '全部', count: filteredTotalVideos },
+            { v: 'organized', label: '已转文章', count: filteredOrganizedCount },
+            { v: 'pending', label: '待处理', count: filteredPendingCount },
           ]}
           openId={openDrop}
           setOpenId={setOpenDrop}
@@ -534,7 +523,7 @@ export function ImportPage() {
         <div className={s.tableScroll}>
           <div className={s.tHead}>
             <span>
-              <button className={allCbxCls} onClick={toggleAll} aria-label="全选" />
+              <button className={allCbxCls} onClick={selection.toggleAllOnPage} aria-label="全选" />
             </span>
             <span>视频</span>
             <span>时长</span>
@@ -549,7 +538,7 @@ export function ImportPage() {
             <div className={s.emptyBlock}>暂无匹配的视频 · 换个筛选条件</div>
           ) : (
             pagedVideos.map((v, i) => {
-              const isSel = selected.has(v.id);
+              const isSel = selection.isSelected(v.id);
               const isOrganized = Boolean(v.article_id);
               return (
                 <div
@@ -561,7 +550,7 @@ export function ImportPage() {
                     if (isOrganized && v.article_id) {
                       navigate(`/articles/${v.article_id}`);
                     } else {
-                      toggleOne(v.id);
+                      selection.toggleOne(v);
                     }
                   }}
                 >
@@ -570,7 +559,7 @@ export function ImportPage() {
                       className={[s.cbx, isSel ? s.cbxOn : ''].join(' ')}
                       onClick={(e) => {
                         e.stopPropagation();
-                        toggleOne(v.id);
+                        selection.toggleOne(v);
                       }}
                       aria-label="选择"
                     />
@@ -647,10 +636,10 @@ export function ImportPage() {
       {selCount > 0 ? (
         <div className={s.stickyBar}>
           <span className={s.stickyCount}>
-            <b>{selCount}</b>条已选中
+            <b>{selCount}</b>条已选中 · 当前页 {selection.pageSelectedCount}
           </span>
           <span className={s.stickySpacer} />
-          <button className={s.stickyGhost} onClick={() => setSelected(new Set())}>
+          <button className={s.stickyGhost} onClick={selection.clearSelection}>
             取消选择
           </button>
           <button

@@ -212,6 +212,27 @@ class ArticleBatchOut(BaseModel):
     missing_ids: list[UUID] = Field(default_factory=list)
 
 
+class ArticleShareIn(BaseModel):
+    article_ids: list[UUID] = Field(min_length=1, max_length=200)
+
+
+class ArticleShareItemOut(BaseModel):
+    id: UUID
+    title: str
+    creator_name: str
+
+
+class ArticleClaudeShareOut(BaseModel):
+    share_id: str
+    file_name: str
+    article_count: int
+    download_url: str
+    local_file_path: str
+    created_at: datetime
+    articles: list[ArticleShareItemOut]
+    missing_ids: list[UUID] = Field(default_factory=list)
+
+
 # ─── Task ───────────────────────────────────────────
 
 TaskStage = Literal["download", "transcribe", "correct", "organize", "save"]
@@ -236,6 +257,7 @@ class TaskOut(BaseModel):
     detail: str | None = None
     article_id: UUID | None = None
     article_title: str | None = None
+    duration_sec: int = 0
     cover_url: str | None = None
     error: str | None = None
     trigger_kind: TaskTriggerKind = "manual"

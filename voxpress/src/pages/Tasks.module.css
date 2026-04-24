@@ -407,11 +407,11 @@
 .tHead,
 .tRow {
   display: grid;
-  grid-template-columns: 20px 12px 120px minmax(220px, 1.4fr) 230px 140px 38px;
+  grid-template-columns: 20px 12px 120px minmax(220px, 1.35fr) 230px 140px 120px 38px;
   gap: 14px;
   padding: 10px 16px;
   align-items: center;
-  min-width: 840px;
+  min-width: 980px;
 }
 .tHead {
   background: var(--vp-bg-2);

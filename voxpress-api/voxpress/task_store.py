@@ -13,6 +13,7 @@ from voxpress.db import session_scope
 from voxpress.models import Article, Creator, Task, TaskArtifact, TaskStageRun, Transcript, Video
 from voxpress.schemas import first_grapheme
 from voxpress.sse import publish_task_event
+from voxpress.task_status import load_effective_status_map
 from voxpress.task_metrics import merge_usage
 
 ACTIVE_STATUSES = ("queued", "running")
@@ -105,6 +106,7 @@ async def _build_task_payload_from_session(
     *,
     include_stage_runs: bool = False,
 ) -> dict[str, Any]:
+    effective_statuses = await load_effective_status_map(s, [task])
     creator = await s.get(Creator, task.creator_id) if task.creator_id else None
     video = await _load_video(s, task)
     article = await _load_article(s, task, video)
@@ -137,12 +139,13 @@ async def _build_task_payload_from_session(
         "creator_name": creator.name if creator else None,
         "creator_initial": first_grapheme(creator.name) if creator else None,
         "stage": task.stage,
-        "status": task.status,
+        "status": effective_statuses.get(task.id, task.status),
         "progress": task.progress,
         "eta_sec": task.eta_sec,
         "detail": task.detail,
         "article_id": str(task.article_id) if task.article_id else (str(article.id) if article else None),
         "article_title": article.title if article else None,
+        "duration_sec": int(video.duration_sec or 0) if video else 0,
         "cover_url": (video.cover_url if video else None),
         "error": task.error,
         "trigger_kind": task.trigger_kind,
@@ -240,6 +243,7 @@ async def _build_task_payloads_from_session(
     ).all()
     for run in runs:
         runs_by_task[run.task_id].append(run)
+    effective_statuses = await load_effective_status_map(s, tasks)
 
     payloads: list[dict[str, Any]] = []
     for task in tasks:
@@ -259,12 +263,13 @@ async def _build_task_payloads_from_session(
             "creator_name": creator.name if creator else None,
             "creator_initial": first_grapheme(creator.name) if creator else None,
             "stage": task.stage,
-            "status": task.status,
+            "status": effective_statuses.get(task.id, task.status),
             "progress": task.progress,
             "eta_sec": task.eta_sec,
             "detail": task.detail,
             "article_id": str(task.article_id) if task.article_id else (str(article.id) if article else None),
             "article_title": article.title if article else None,
+            "duration_sec": int(video.duration_sec or 0) if video else 0,
             "cover_url": video.cover_url if video else None,
             "error": task.error,
             "trigger_kind": task.trigger_kind,

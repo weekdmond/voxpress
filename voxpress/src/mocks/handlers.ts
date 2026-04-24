@@ -113,6 +113,28 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
     return delay(page(items.slice(0, limit), null, total));
   }
 
+  if (method === 'POST' && path === '/api/articles/share/claude') {
+    const ids = ((body as { article_ids?: string[] } | undefined)?.article_ids ?? []).filter(Boolean);
+    const matched = ids
+      .map((id) => articleDetails[id])
+      .filter((article): article is ArticleDetail => Boolean(article));
+    const shareId = Math.random().toString(36).slice(2, 10);
+    return delay({
+      share_id: shareId,
+      file_name: `voxpress-claude-demo-${shareId}.md`,
+      article_count: matched.length,
+      download_url: `/api/articles/share/voxpress-claude-demo-${shareId}.md`,
+      local_file_path: `/tmp/voxpress/shares/voxpress-claude-demo-${shareId}.md`,
+      created_at: new Date().toISOString(),
+      articles: matched.map((article) => ({
+        id: article.id,
+        title: article.title,
+        creator_name: article.source.creator_snapshot.name,
+      })),
+      missing_ids: ids.filter((id) => !articleDetails[id]),
+    });
+  }
+
   const articleMatch = match(path, /^\/api\/articles\/([\w-]+)$/);
   if (method === 'GET' && articleMatch) {
     const id = articleMatch[1];

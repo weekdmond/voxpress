@@ -289,7 +289,7 @@
 .tHead,
 .tRow {
   display: grid;
-  grid-template-columns: 28px minmax(220px, 1fr) 120px minmax(130px, 1fr) 150px 78px 90px 38px;
+  grid-template-columns: 28px minmax(220px, 1fr) 120px minmax(130px, 1fr) 150px 172px 38px;
   gap: 14px;
   padding: 10px 16px;
   align-items: center;
@@ -451,9 +451,37 @@
 
 .dateCell {
   font-family: var(--vp-font-mono);
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--vp-ink-3);
   white-space: nowrap;
+}
+
+.timeCell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.timeLine {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.timeLabel {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--vp-bg-2);
+  color: var(--vp-ink-4);
+  font-family: var(--vp-font-mono);
+  font-size: 9.5px;
+  flex-shrink: 0;
 }
 
 .costCell {
@@ -592,21 +620,28 @@
   display: flex;
   gap: 4px;
 }
-.pagerBtns button {
+.pagerBtns a,
+.pagerDisabled {
   width: 26px;
   height: 26px;
   border: 1px solid var(--vp-line);
   background: var(--vp-panel);
   border-radius: 5px;
-  cursor: pointer;
   font-family: inherit;
   font-size: 11px;
   color: var(--vp-ink-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
 }
-.pagerBtns button:hover:not(:disabled) {
+.pagerBtns a {
+  cursor: pointer;
+}
+.pagerBtns a:hover {
   background: var(--vp-bg-2);
 }
-.pagerBtns button:disabled {
+.pagerDisabled {
   color: var(--vp-ink-4);
   cursor: default;
 }

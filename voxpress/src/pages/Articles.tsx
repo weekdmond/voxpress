@@ -1,14 +1,25 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Page, PageHead } from '@/layouts/AppShell';
+import { ClaudeShareDialog } from '@/components/ClaudeShare/ClaudeShareDialog';
 import { TaskDrawer } from '@/components/Task/TaskDrawer';
+import { useCrossPageSelection } from '@/hooks/useCrossPageSelection';
 import { Avatar, ConfirmDialog, Icon } from '@/components/primitives';
-import { api } from '@/lib/api';
+import { api, apiUrl } from '@/lib/api';
+import {
+  ARTICLE_PAGE_SIZE,
+  ARTICLE_SORT_OPTIONS,
+  ARTICLE_TIME_OPTIONS,
+  DEFAULT_ARTICLE_LIST_STATE,
+  buildArticleListApiParams,
+  buildArticleListSearchParams,
+  parseArticleListState,
+} from '@/lib/articleList';
 import { thumbGradient } from '@/lib/gradients';
 import { mediaCandidates } from '@/lib/media';
-import { formatCount, formatDate, formatDuration, formatRelative } from '@/lib/format';
+import { formatCount, formatDateTime, formatDuration } from '@/lib/format';
 import type {
   Article,
   Creator,
@@ -19,7 +30,6 @@ import type {
 } from '@/types/api';
 import s from './Articles.module.css';
 
-type TimeFilter = 'all' | '7d' | '30d' | '90d';
 type RebuildStage = 'auto' | 'download' | 'transcribe' | 'correct' | 'organize';
 
 const REBUILD_STAGE_OPTIONS: { v: RebuildStage; label: string }[] = [
@@ -29,15 +39,6 @@ const REBUILD_STAGE_OPTIONS: { v: RebuildStage; label: string }[] = [
   { v: 'correct', label: '从校对开始' },
   { v: 'organize', label: '从整理开始' },
 ];
-
-const TIME_OPTIONS: { v: TimeFilter; label: string }[] = [
-  { v: 'all', label: '全部' },
-  { v: '7d', label: '近 7 天' },
-  { v: '30d', label: '近 30 天' },
-  { v: '90d', label: '近 90 天' },
-];
-
-const PAGE_SIZE = 20;
 
 function labelFromTitle(title: string): string {
   const clean = title.replace(/[#《》「」"'"'，。、！？,.:;]/g, '').trim();
@@ -146,23 +147,21 @@ function Dropdown<T extends string>({
 
 export function ArticlesPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const qc = useQueryClient();
-
-  const [creatorFilter, setCreatorFilter] = useState<string>('all');
-  const [time, setTime] = useState<TimeFilter>('all');
-  const [tagFilter, setTagFilter] = useState<string>('all');
-  const [qDraft, setQDraft] = useState('');
-  const [q, setQ] = useState('');
-  useEffect(() => {
-    const id = setTimeout(() => setQ(qDraft.trim()), 250);
-    return () => clearTimeout(id);
-  }, [qDraft]);
-  const [page, setPage] = useState(1);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [searchParams, setSearchParams] = useSearchParams();
+  const listState = useMemo(() => parseArticleListState(searchParams), [searchParams]);
+  const { creatorFilter, time, tagFilter, sort, q, page } = listState;
+  const [qDraft, setQDraft] = useState(q);
   const [openDrop, setOpenDrop] = useState<string | null>(null);
   const [rebuildStage, setRebuildStage] = useState<RebuildStage>('auto');
   const [taskDrawerId, setTaskDrawerId] = useState<string | null>(null);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [claudeShareOpen, setClaudeShareOpen] = useState(false);
+
+  useEffect(() => {
+    setQDraft(q);
+  }, [q]);
 
   useEffect(() => {
     if (!openDrop) return;
@@ -171,21 +170,37 @@ export function ArticlesPage() {
     return () => document.removeEventListener('click', onDoc);
   }, [openDrop]);
 
+  const updateListState = useCallback(
+    (patch: Partial<typeof listState>, options?: { resetPage?: boolean }) => {
+      setSearchParams(
+        (current) => {
+          const currentState = parseArticleListState(current);
+          const next = {
+            ...currentState,
+            ...patch,
+            page: options?.resetPage ? 1 : (patch.page ?? currentState.page),
+          };
+          return buildArticleListSearchParams(next);
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
   useEffect(() => {
-    setSelected(new Set());
-    setPage(1);
-  }, [creatorFilter, time, tagFilter, q]);
+    const id = window.setTimeout(() => {
+      const nextQ = qDraft.trim();
+      if (nextQ !== q) {
+        updateListState({ q: nextQ }, { resetPage: true });
+      }
+    }, 250);
+    return () => window.clearTimeout(id);
+  }, [qDraft, q, updateListState]);
 
   const listParams = useMemo(() => {
-    const p = new URLSearchParams();
-    if (creatorFilter !== 'all') p.set('creator_id', creatorFilter);
-    if (tagFilter !== 'all') p.set('tag', tagFilter);
-    if (time !== 'all') p.set('since', time);
-    if (q) p.set('q', q);
-    p.set('limit', String(PAGE_SIZE));
-    p.set('offset', String((page - 1) * PAGE_SIZE));
-    return p.toString();
-  }, [creatorFilter, tagFilter, time, q, page]);
+    return buildArticleListApiParams(listState).toString();
+  }, [listState]);
 
   const { data: listPage } = useQuery({
     queryKey: ['articles', listParams],
@@ -205,7 +220,12 @@ export function ArticlesPage() {
 
   const articles = listPage?.items ?? [];
   const listTotal = listPage?.total ?? articles.length;
-  const totalPages = Math.max(1, Math.ceil(listTotal / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(listTotal / ARTICLE_PAGE_SIZE));
+  const selectionScope = useMemo(
+    () => JSON.stringify({ creatorFilter, time, tagFilter, q, sort }),
+    [creatorFilter, time, tagFilter, q, sort],
+  );
+  const selection = useCrossPageSelection(selectionScope, articles);
 
   const tagFacets = useMemo(() => {
     const counts = new Map<string, number>();
@@ -226,7 +246,7 @@ export function ArticlesPage() {
     },
     onSuccess: (n) => {
       toast.success(`已加入重新整理队列 · ${n} 篇`);
-      setSelected(new Set());
+      selection.clearSelection();
       qc.invalidateQueries({ queryKey: ['articles'] });
       qc.invalidateQueries({ queryKey: ['tasks'] });
     },
@@ -247,7 +267,7 @@ export function ArticlesPage() {
     },
     onSuccess: (n) => {
       toast.success(`已删除 ${n} 篇`);
-      setSelected(new Set());
+      selection.clearSelection();
       qc.invalidateQueries({ queryKey: ['articles'] });
     },
     onError: (e: Error) => toast.error(e.message || '删除失败'),
@@ -275,47 +295,26 @@ export function ArticlesPage() {
   });
 
   const exportOne = (id: string) => {
-    window.open(`/api/articles/${id}/export.md`, '_blank');
+    window.open(apiUrl(`/api/articles/${id}/export.md`), '_blank');
   };
 
-  const pageIds = articles.map((a) => a.id);
-  const allOnPageSelected =
-    pageIds.length > 0 && pageIds.every((id) => selected.has(id));
-  const someOnPageSelected = pageIds.some((id) => selected.has(id));
-  const allCbxCls = !someOnPageSelected
+  const allCbxCls = !selection.someOnPageSelected
     ? s.cbx
-    : allOnPageSelected
+    : selection.allOnPageSelected
     ? [s.cbx, s.cbxOn].join(' ')
     : [s.cbx, s.cbxIndet].join(' ');
 
-  const toggleOne = (id: string) => {
-    setSelected((prev) => {
-      const n = new Set(prev);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
-      return n;
-    });
-  };
-  const toggleAll = () => {
-    setSelected((prev) => {
-      if (allOnPageSelected) {
-        const n = new Set(prev);
-        pageIds.forEach((id) => n.delete(id));
-        return n;
-      }
-      const n = new Set(prev);
-      pageIds.forEach((id) => n.add(id));
-      return n;
-    });
+  const clearAll = () => {
+    setSearchParams(buildArticleListSearchParams(DEFAULT_ARTICLE_LIST_STATE), { replace: true });
+    setQDraft('');
   };
 
-  const clearAll = () => {
-    setCreatorFilter('all');
-    setTime('all');
-    setTagFilter('all');
-    setQDraft('');
-    setQ('');
+  const pageHref = (targetPage: number) => {
+    const params = buildArticleListSearchParams({ ...listState, page: targetPage }).toString();
+    return params ? `/articles?${params}` : '/articles';
   };
+
+  const currentSortLabel = ARTICLE_SORT_OPTIONS.find((o) => o.v === sort)?.label ?? '发布时间';
 
   const creatorLabel =
     creatorFilter === 'all'
@@ -323,19 +322,25 @@ export function ArticlesPage() {
       : creatorMap.get(Number(creatorFilter))?.name ?? `#${creatorFilter}`;
   const activeFilters: { k: string; label: string; reset: () => void }[] = [
     ...(creatorFilter !== 'all'
-      ? [{ k: '创作者', label: creatorLabel, reset: () => setCreatorFilter('all') }]
+      ? [
+          {
+            k: '创作者',
+            label: creatorLabel,
+            reset: () => updateListState({ creatorFilter: 'all' }, { resetPage: true }),
+          },
+        ]
       : []),
     ...(time !== 'all'
       ? [
           {
             k: '时间',
-            label: TIME_OPTIONS.find((o) => o.v === time)!.label,
-            reset: () => setTime('all'),
+            label: ARTICLE_TIME_OPTIONS.find((o) => o.v === time)!.label,
+            reset: () => updateListState({ time: 'all' }, { resetPage: true }),
           },
         ]
       : []),
     ...(tagFilter !== 'all'
-      ? [{ k: '标签', label: `#${tagFilter}`, reset: () => setTagFilter('all') }]
+      ? [{ k: '标签', label: `#${tagFilter}`, reset: () => updateListState({ tagFilter: 'all' }, { resetPage: true }) }]
       : []),
   ];
 
@@ -357,8 +362,8 @@ export function ArticlesPage() {
     return opts;
   }, [tagFacets, listTotal]);
 
-  const selCount = selected.size;
-  const selectedIds = Array.from(selected);
+  const selCount = selection.selectedCount;
+  const selectedIds = selection.selectedIds;
 
   return (
     <Page>
@@ -381,16 +386,16 @@ export function ArticlesPage() {
           options={creatorOptions}
           openId={openDrop}
           setOpenId={setOpenDrop}
-          onSelect={setCreatorFilter}
+          onSelect={(value) => updateListState({ creatorFilter: value }, { resetPage: true })}
         />
         <Dropdown
           id="time"
           k="时间"
           value={time}
-          options={TIME_OPTIONS.map((o) => ({ v: o.v, label: o.label }))}
+          options={ARTICLE_TIME_OPTIONS.map((o) => ({ v: o.v, label: o.label }))}
           openId={openDrop}
           setOpenId={setOpenDrop}
-          onSelect={setTime}
+          onSelect={(value) => updateListState({ time: value }, { resetPage: true })}
         />
         <Dropdown
           id="tag"
@@ -399,8 +404,17 @@ export function ArticlesPage() {
           options={tagOptions}
           openId={openDrop}
           setOpenId={setOpenDrop}
-          onSelect={setTagFilter}
+          onSelect={(value) => updateListState({ tagFilter: value }, { resetPage: true })}
           headerLabel={tagFacets.length ? '高频标签' : undefined}
+        />
+        <Dropdown
+          id="sort"
+          k="排序"
+          value={sort}
+          options={ARTICLE_SORT_OPTIONS}
+          openId={openDrop}
+          setOpenId={setOpenDrop}
+          onSelect={(value) => updateListState({ sort: value }, { resetPage: true })}
         />
         <div className={s.fbDivider} />
         <div className={s.search}>
@@ -453,7 +467,7 @@ export function ArticlesPage() {
           </span>
         </h2>
         <span className={s.listHeadMeta}>
-          按日期倒序 · 第 {page} 页 / 共 {totalPages} 页
+          按{currentSortLabel}倒序 · 第 {page} 页 / 共 {totalPages} 页
         </span>
       </div>
 
@@ -461,14 +475,13 @@ export function ArticlesPage() {
         <div className={s.tableScroll}>
           <div className={s.tHead}>
             <span>
-              <button className={allCbxCls} onClick={toggleAll} aria-label="全选" />
+              <button className={allCbxCls} onClick={selection.toggleAllOnPage} aria-label="全选" />
             </span>
             <span>文章</span>
             <span>博主</span>
             <span>标签</span>
             <span>指标</span>
-            <span>发布</span>
-            <span>更新</span>
+            <span>时间</span>
             <span />
           </div>
           {articles.length === 0 ? (
@@ -476,26 +489,29 @@ export function ArticlesPage() {
           ) : (
             articles.map((a, i) => {
               const c = creatorMap.get(a.creator_id);
-              const isSel = selected.has(a.id);
-              return (
+                const isSel = selection.isSelected(a.id);
+                return (
                 <div
                   key={a.id}
                   className={[s.tRow, isSel ? s.tRowSelected : ''].join(' ')}
                   onClick={(e) => {
                     const tgt = e.target as HTMLElement;
                     if (tgt.closest('button')) return;
-                    navigate(`/articles/${a.id}`);
+                    navigate({
+                      pathname: `/articles/${a.id}`,
+                      search: location.search,
+                    });
                   }}
                 >
                   <span>
                     <button
-                      className={[s.cbx, isSel ? s.cbxOn : ''].join(' ')}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleOne(a.id);
-                      }}
-                      aria-label="选择"
-                    />
+                        className={[s.cbx, isSel ? s.cbxOn : ''].join(' ')}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          selection.toggleOne(a);
+                        }}
+                        aria-label="选择"
+                      />
                   </span>
                   <div className={s.artCell}>
                     <ArticleCover
@@ -545,15 +561,19 @@ export function ArticlesPage() {
                       {formatCount(a.likes_snapshot)}
                     </span>
                   </div>
-                  <span className={s.dateCell} title={formatDate(a.published_at)}>
-                    {formatRelative(a.published_at)}
-                  </span>
-                  <span
-                    className={s.dateCell}
-                    title={new Date(a.updated_at).toLocaleString('zh-CN')}
+                  <div
+                    className={s.timeCell}
+                    title={`发布 ${formatDateTime(a.published_at)}\n更新 ${formatDateTime(a.updated_at)}`}
                   >
-                    {formatRelative(a.updated_at)}
-                  </span>
+                    <span className={s.timeLine}>
+                      <span className={s.timeLabel}>发</span>
+                      <span className={s.dateCell}>{formatDateTime(a.published_at)}</span>
+                    </span>
+                    <span className={s.timeLine}>
+                      <span className={s.timeLabel}>更</span>
+                      <span className={s.dateCell}>{formatDateTime(a.updated_at)}</span>
+                    </span>
+                  </div>
                   <button
                     className={s.rowAct}
                     title="查看任务"
@@ -578,30 +598,35 @@ export function ArticlesPage() {
       {totalPages > 1 ? (
         <div className={s.pager}>
           <span>
-            共 {totalPages} 页 · 每页 {PAGE_SIZE} 条
+            共 {totalPages} 页 · 每页 {ARTICLE_PAGE_SIZE} 条
           </span>
           <div className={s.pagerBtns}>
-            <button disabled={page <= 1} onClick={() => setPage(page - 1)}>
-              ‹
-            </button>
+            {page <= 1 ? (
+              <span className={s.pagerDisabled}>‹</span>
+            ) : (
+              <Link to={pageHref(page - 1)}>‹</Link>
+            )}
             {buildPageNumbers(page, totalPages).map((p, i) =>
               p === '...' ? (
-                <button key={`e${i}`} disabled>
+                <span key={`e${i}`} className={s.pagerDisabled}>
                   …
-                </button>
+                </span>
               ) : (
-                <button
+                <Link
                   key={p}
-                  className={p === page ? s.pagerBtnOn : ''}
-                  onClick={() => setPage(p)}
+                  className={p === page ? s.pagerBtnOn : undefined}
+                  to={pageHref(p)}
+                  aria-current={p === page ? 'page' : undefined}
                 >
                   {p}
-                </button>
+                </Link>
               ),
             )}
-            <button disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
-              ›
-            </button>
+            {page >= totalPages ? (
+              <span className={s.pagerDisabled}>›</span>
+            ) : (
+              <Link to={pageHref(page + 1)}>›</Link>
+            )}
           </div>
         </div>
       ) : null}
@@ -609,10 +634,10 @@ export function ArticlesPage() {
       {selCount > 0 ? (
         <div className={s.stickyBar}>
           <span className={s.stickyCount}>
-            <b>{selCount}</b>篇已选中
+            <b>{selCount}</b>篇已选中 · 当前页 {selection.pageSelectedCount}
           </span>
           <span className={s.stickySpacer} />
-          <button className={s.stickyGhost} onClick={() => setSelected(new Set())}>
+          <button className={s.stickyGhost} onClick={selection.clearSelection}>
             取消选择
           </button>
           <select
@@ -644,6 +669,9 @@ export function ArticlesPage() {
           >
             删除
           </button>
+          <button className={s.stickyGhost} onClick={() => setClaudeShareOpen(true)}>
+            发给 Claude
+          </button>
           <button
             className={s.stickyPrimary}
             onClick={() => selectedIds.forEach((id) => exportOne(id))}
@@ -661,6 +689,12 @@ export function ArticlesPage() {
           onCancel={(id) => cancelOne.mutate(id)}
         />
       ) : null}
+
+      <ClaudeShareDialog
+        open={claudeShareOpen}
+        articleIds={selectedIds}
+        onClose={() => setClaudeShareOpen(false)}
+      />
 
       <ConfirmDialog
         open={confirmDeleteOpen}

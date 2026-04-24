@@ -89,8 +89,8 @@ export function TaskDrawer({ taskId, onClose, onRerun, onCancel }: TaskDrawerPro
           <div style={{ minWidth: 0, flex: 1 }}>
             <div className={s.title}>{t?.title_guess || t?.article_title || '加载中…'}</div>
             <div className={s.sub}>
-              {t?.creator_name ?? '—'} · {t ? formatRelative(t.started_at) : '—'} ·{' '}
-              {t?.status ?? '—'}
+              {t?.creator_name ?? '—'} · {t?.duration_sec ? formatDuration(t.duration_sec) : '—'} ·{' '}
+              {t ? formatRelative(t.started_at) : '—'} · {t?.status ?? '—'}
             </div>
           </div>
           <button className={s.close} onClick={onClose} aria-label="关闭">
@@ -254,6 +254,10 @@ export function TaskDrawer({ taskId, onClose, onRerun, onCancel }: TaskDrawerPro
                 <div className={s.metaRow}>
                   <span>触发</span>
                   <span>{t.trigger_kind}</span>
+                </div>
+                <div className={s.metaRow}>
+                  <span>时长</span>
+                  <span>{t.duration_sec ? formatDuration(t.duration_sec) : '—'}</span>
                 </div>
                 <div className={s.metaRow}>
                   <span>开始</span>

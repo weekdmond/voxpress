@@ -7,9 +7,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import Text, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from voxpress.creator_refresh import start_creator_refresh_run
 from voxpress.db import get_session
+from voxpress.errors import ApiError
 from voxpress.models import SystemJobRun
 from voxpress.schemas import Page, SystemJobRunOut, SystemJobSummaryOut
+from voxpress.system_job_store import SystemJobAlreadyRunning
 
 router = APIRouter(prefix="/api/system-jobs", tags=["system-jobs"])
 
@@ -53,6 +56,30 @@ def _job_filters(*, status: str | None, time_range: str | None, q: str | None) -
             )
         )
     return clauses
+
+
+def _job_name_for_key(job_key: str) -> str:
+    if job_key == "creator_refresh":
+        return "博主定时刷新"
+    raise ApiError("暂不支持该系统任务", code="unsupported_system_job", status_code=404)
+
+
+async def _raise_running_job_error(s: AsyncSession, job_key: str) -> None:
+    running = await s.scalar(
+        select(SystemJobRun)
+        .where(SystemJobRun.job_key == job_key, SystemJobRun.status == "running")
+        .order_by(SystemJobRun.started_at.desc())
+        .limit(1)
+    )
+    detail: dict[str, str] = {"job_key": job_key}
+    if running is not None:
+        detail["run_id"] = str(running.id)
+    raise ApiError(
+        "该系统任务正在执行中",
+        code="system_job_running",
+        status_code=409,
+        detail=detail,
+    )
 
 
 @router.get("", response_model=Page[SystemJobRunOut])
@@ -163,3 +190,28 @@ async def system_jobs_summary(
         status_counts=status_counts,
     )
 
+
+@router.post("/{job_key}/run", response_model=SystemJobRunOut)
+async def run_system_job(job_key: str, s: AsyncSession = Depends(get_session)) -> SystemJobRunOut:
+    _job_name_for_key(job_key)
+    running = await s.scalar(
+        select(SystemJobRun)
+        .where(SystemJobRun.job_key == job_key, SystemJobRun.status == "running")
+        .order_by(SystemJobRun.started_at.desc())
+        .limit(1)
+    )
+    if running is not None:
+        await _raise_running_job_error(s, job_key)
+
+    if job_key == "creator_refresh":
+        try:
+            run_id = await start_creator_refresh_run(trigger_kind="manual", background=True)
+        except SystemJobAlreadyRunning:
+            await _raise_running_job_error(s, job_key)
+    else:
+        raise ApiError("暂不支持该系统任务", code="unsupported_system_job", status_code=404)
+
+    row = await s.get(SystemJobRun, run_id)
+    if row is None:
+        raise ApiError("系统任务已触发但记录未生成", code="system_job_missing", status_code=500)
+    return SystemJobRunOut.model_validate(row)

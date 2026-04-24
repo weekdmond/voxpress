@@ -9,8 +9,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sse_starlette.sse import EventSourceResponse
-from sqlalchemy import Text, cast, exists, func, or_, select
+from sqlalchemy import Text, case, cast, exists, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from voxpress.db import get_session, session_scope
 from voxpress.errors import InvalidUrl, TaskNotFound
@@ -115,17 +116,12 @@ async def _create_task(
 
 def _task_filters(
     *,
-    status: str | None,
     stage: str | None,
     time_range: str | None,
     q: str | None,
     model: str | None,
 ) -> list[Any]:
     clauses: list[Any] = []
-    if status == "active":
-        clauses.append(Task.status.in_(ACTIVE_STATUSES))
-    elif status:
-        clauses.append(Task.status == status)
     if stage:
         clauses.append(Task.stage == stage)
     cutoff = _time_cutoff(time_range)
@@ -156,6 +152,104 @@ def _task_filters(
             )
         )
     return clauses
+
+
+def _task_status_requires_effective_status(status: str | None) -> bool:
+    return status in {"done", "failed"}
+
+
+def _task_status_filter(raw_status, effective_status, requested_status: str | None):
+    if not requested_status or requested_status == "all":
+        return None
+    if requested_status == "active":
+        return raw_status.in_(ACTIVE_STATUSES)
+    return effective_status == requested_status
+
+
+def _task_status_candidate_clauses(status: str | None) -> list[Any]:
+    if not status or status == "all":
+        return []
+    if status == "active":
+        return [Task.status.in_(ACTIVE_STATUSES)]
+    if status == "done":
+        return [Task.status.in_(("done", "failed"))]
+    if status == "failed":
+        return [Task.status == "failed"]
+    return [Task.status == status]
+
+
+def _effective_task_status_select(clauses: list[Any], *, status: str | None = None):
+    base = (
+        select(
+            Task.id.label("id"),
+            Task.status.label("raw_status"),
+        )
+        .where(*clauses)
+        .cte("task_base")
+    )
+
+    first_child = aliased(Task)
+    descendants = (
+        select(
+            base.c.id.label("root_id"),
+            first_child.id.label("id"),
+            first_child.status.label("status"),
+            first_child.started_at.label("started_at"),
+        )
+        .select_from(base.join(first_child, first_child.rerun_of_task_id == base.c.id))
+        .cte("task_descendants", recursive=True)
+    )
+
+    next_child = aliased(Task)
+    descendants = descendants.union_all(
+        select(
+            descendants.c.root_id,
+            next_child.id,
+            next_child.status,
+            next_child.started_at,
+        ).select_from(descendants.join(next_child, next_child.rerun_of_task_id == descendants.c.id))
+    )
+
+    ranked_descendants = (
+        select(
+            descendants.c.root_id,
+            descendants.c.status.label("latest_status"),
+            func.row_number()
+            .over(
+                partition_by=descendants.c.root_id,
+                order_by=(
+                    descendants.c.started_at.desc().nulls_last(),
+                    descendants.c.id.desc(),
+                ),
+            )
+            .label("rn"),
+        )
+        .subquery()
+    )
+    latest_descendant = (
+        select(ranked_descendants.c.root_id, ranked_descendants.c.latest_status)
+        .where(ranked_descendants.c.rn == 1)
+        .subquery()
+    )
+    effective_status = case(
+        (
+            (base.c.raw_status == "failed") & (latest_descendant.c.latest_status == "done"),
+            literal("done"),
+        ),
+        else_=base.c.raw_status,
+    ).label("effective_status")
+    stmt = (
+        select(
+            base.c.id,
+            base.c.raw_status,
+            effective_status,
+        )
+        .select_from(base.outerjoin(latest_descendant, latest_descendant.c.root_id == base.c.id))
+    )
+    status_filter = _task_status_filter(base.c.raw_status, effective_status, status)
+    if status_filter is not None:
+        stmt = stmt.where(status_filter)
+    return stmt
 
 
 def _task_sort_order(sort: str) -> list[Any]:
@@ -227,29 +321,45 @@ async def list_tasks(
     limit: int = Query(20, ge=1, le=200),
 ) -> Page[TaskOut]:
     clauses = _task_filters(
-        status=status,
         stage=stage,
         time_range=time_range or since,
         q=q,
         model=model,
     )
-    total = await s.scalar(select(func.count()).select_from(Task).where(*clauses))
+    clauses.extend(_task_status_candidate_clauses(status))
+
     resolved_offset = offset if offset is not None else max(0, (page - 1) * limit)
-    task_ids = list(
-        (
-            await s.scalars(
-                select(Task.id)
-                .where(*clauses)
-                .order_by(*_task_sort_order(sort))
-                .offset(resolved_offset)
-                .limit(limit)
-            )
-        ).all()
-    )
+    if _task_status_requires_effective_status(status):
+        filtered_statuses = _effective_task_status_select(clauses, status=status).subquery()
+        total = int(await s.scalar(select(func.count()).select_from(filtered_statuses)) or 0)
+        task_ids = list(
+            (
+                await s.scalars(
+                    select(Task.id)
+                    .join(filtered_statuses, filtered_statuses.c.id == Task.id)
+                    .order_by(*_task_sort_order(sort))
+                    .offset(resolved_offset)
+                    .limit(limit)
+                )
+            ).all()
+        )
+    else:
+        total = int(await s.scalar(select(func.count()).select_from(Task).where(*clauses)) or 0)
+        task_ids = list(
+            (
+                await s.scalars(
+                    select(Task.id)
+                    .where(*clauses)
+                    .order_by(*_task_sort_order(sort))
+                    .offset(resolved_offset)
+                    .limit(limit)
+                )
+            ).all()
+        )
     payloads = await build_task_payloads(task_ids)
     payload_map = {item["id"]: item for item in payloads}
     ordered = [payload_map[str(task_id)] for task_id in task_ids if str(task_id) in payload_map]
-    return Page(items=[TaskOut.model_validate(item) for item in ordered], cursor=None, total=total or 0)
+    return Page(items=[TaskOut.model_validate(item) for item in ordered], cursor=None, total=total)
 
 
 @router.get("/summary", response_model=TaskSummaryOut)
@@ -263,23 +373,47 @@ async def tasks_summary(
     q: str | None = Query(None),
 ) -> TaskSummaryOut:
     clauses = _task_filters(
-        status=status,
         stage=stage,
         time_range=time_range or since,
         q=q,
         model=model,
     )
+    clauses.extend(_task_status_candidate_clauses(status))
+    filtered_statuses = _effective_task_status_select(clauses, status=status).subquery()
+    task_rows = (
+        select(
+            Task.id.label("id"),
+            Task.started_at.label("started_at"),
+            Task.cost_cny.label("cost_cny"),
+            Task.total_tokens.label("total_tokens"),
+            Task.elapsed_ms.label("elapsed_ms"),
+            filtered_statuses.c.effective_status.label("effective_status"),
+        )
+        .join(filtered_statuses, filtered_statuses.c.id == Task.id)
+        .subquery()
+    )
     today_cutoff = _local_now().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_tasks = int(await s.scalar(select(func.count()).select_from(Task).where(*clauses, Task.started_at >= today_cutoff)) or 0)
+    today_tasks = int(
+        await s.scalar(
+            select(func.count()).select_from(task_rows).where(task_rows.c.started_at >= today_cutoff)
+        )
+        or 0
+    )
     today_success = int(
         await s.scalar(
-            select(func.count()).select_from(Task).where(*clauses, Task.started_at >= today_cutoff, Task.status == "done")
+            select(func.count()).select_from(task_rows).where(
+                task_rows.c.started_at >= today_cutoff,
+                task_rows.c.effective_status == "done",
+            )
         )
         or 0
     )
     today_failed = int(
         await s.scalar(
-            select(func.count()).select_from(Task).where(*clauses, Task.started_at >= today_cutoff, Task.status == "failed")
+            select(func.count()).select_from(task_rows).where(
+                task_rows.c.started_at >= today_cutoff,
+                task_rows.c.effective_status == "failed",
+            )
         )
         or 0
     )
@@ -288,7 +422,9 @@ async def tasks_summary(
     total_cost = round(
         float(
             await s.scalar(
-                select(func.coalesce(func.sum(Task.cost_cny), 0)).where(*clauses, Task.started_at >= today_cutoff)
+                select(func.coalesce(func.sum(task_rows.c.cost_cny), 0)).where(
+                    task_rows.c.started_at >= today_cutoff
+                )
             )
             or 0.0
         ),
@@ -296,35 +432,39 @@ async def tasks_summary(
     )
     total_tokens = int(
         await s.scalar(
-            select(func.coalesce(func.sum(Task.total_tokens), 0)).where(*clauses, Task.started_at >= today_cutoff)
+            select(func.coalesce(func.sum(task_rows.c.total_tokens), 0)).where(
+                task_rows.c.started_at >= today_cutoff
+            )
         )
         or 0
     )
     avg_elapsed = int(
         await s.scalar(
-            select(func.coalesce(func.avg(Task.elapsed_ms), 0)).where(
-                *clauses,
-                Task.started_at >= today_cutoff,
-                Task.elapsed_ms.is_not(None),
+            select(func.coalesce(func.avg(task_rows.c.elapsed_ms), 0)).where(
+                task_rows.c.started_at >= today_cutoff,
+                task_rows.c.elapsed_ms.is_not(None),
             )
         )
         or 0
     )
-    status_rows = (
-        await s.execute(select(Task.status, func.count()).where(*clauses).group_by(Task.status))
+    status_count_rows = (
+        await s.execute(
+            select(task_rows.c.effective_status, func.count())
+            .select_from(task_rows)
+            .group_by(task_rows.c.effective_status)
+        )
     ).all()
     status_counts = {"running": 0, "queued": 0, "done": 0, "failed": 0, "canceled": 0}
-    for task_status, count in status_rows:
-        if task_status in status_counts:
-            status_counts[task_status] = int(count)
+    for effective_status, count in status_count_rows:
+        if effective_status in status_counts:
+            status_counts[effective_status] = int(count)
     status_counts["active"] = status_counts["running"] + status_counts["queued"]
-    task_ids_subquery = select(Task.id).where(*clauses).subquery()
     model_rows = (
         await s.execute(
             select(TaskStageRun.model, func.count(func.distinct(TaskStageRun.task_id)))
             .where(
                 TaskStageRun.model.is_not(None),
-                TaskStageRun.task_id.in_(select(task_ids_subquery.c.id)),
+                TaskStageRun.task_id.in_(select(filtered_statuses.c.id)),
             )
             .group_by(TaskStageRun.model)
         )
@@ -586,6 +726,7 @@ async def cancel_task(task_id: UUID) -> TaskOut:
             "eta_sec": t.eta_sec,
             "detail": t.detail,
             "article_id": str(t.article_id) if t.article_id else None,
+            "duration_sec": 0,
             "error": t.error,
             "started_at": t.started_at,
             "updated_at": t.updated_at,

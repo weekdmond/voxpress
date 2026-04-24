@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import re
+import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Query
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from voxpress.config import settings
 from voxpress.db import get_session
 from voxpress.errors import NotFound
 from voxpress.markdown import md_to_html, strip_background_notes_md, word_count_cn
@@ -17,9 +22,12 @@ from voxpress.schemas import (
     ArticleBatchIn,
     ArticleBatchOut,
     ArticleDetailOut,
+    ArticleClaudeShareOut,
     ArticleOut,
     ArticlePatch,
     ArticleRebuildIn,
+    ArticleShareIn,
+    ArticleShareItemOut,
     ArticleSource,
     Page,
     TranscriptSegmentOut,
@@ -44,9 +52,172 @@ def _latest_task_id_subquery(article_id_expr, video_id_expr):
     )
 
 
+def _article_sort_order(sort: str) -> list[Any]:
+    sort = sort or "published_at:desc"
+    field, _, direction = sort.partition(":")
+    desc = direction != "asc"
+    expr = {
+        "published_at": Article.published_at,
+        "updated_at": Article.updated_at,
+        "word_count": Article.word_count,
+        "likes_snapshot": Article.likes_snapshot,
+    }.get(field, Article.published_at)
+    primary = expr.desc().nulls_last() if desc else expr.asc().nulls_last()
+    tie_breaker = Article.id.desc() if desc else Article.id.asc()
+    return [primary, tie_breaker]
+
+
+def _share_dir() -> Path:
+    path = settings.audio_dir.parent / "shares"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _cleanup_old_shares(path: Path) -> None:
+    cutoff = datetime.now(tz=timezone.utc).timestamp() - 7 * 86_400
+    for item in path.glob("*.md"):
+        try:
+            if item.stat().st_mtime < cutoff:
+                item.unlink()
+        except OSError:
+            continue
+
+
+def _filename_slug(title: str) -> str:
+    slug = re.sub(r"[^\w\u4e00-\u9fff-]+", "-", title.strip()).strip("-_")
+    return (slug or "articles")[:48]
+
+
+def _md_scalar(value: object | None) -> str:
+    if value is None or value == "":
+        return "—"
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def _transcript_text(transcript: Transcript | None) -> tuple[str, str]:
+    if not transcript:
+        return "", "逐字稿"
+    if transcript.corrected_text and transcript.corrected_text.strip():
+        return transcript.corrected_text.strip(), "校正逐字稿"
+    if transcript.raw_text and transcript.raw_text.strip():
+        return transcript.raw_text.strip(), "原始逐字稿"
+    segments = transcript.segments or []
+    parts = [str(seg.get("text", "")).strip() for seg in segments if isinstance(seg, dict)]
+    return "\n".join(part for part in parts if part), "逐字稿分段"
+
+
+def _build_claude_bundle(
+    rows: list[tuple[Article, Creator, Video, Transcript | None]],
+    *,
+    created_at: datetime,
+) -> str:
+    lines = [
+        "# VoxPress Claude 文章原稿包",
+        "",
+        f"- 导出时间: {created_at.isoformat()}",
+        f"- 文章数量: {len(rows)}",
+        "",
+        "这份文件由 VoxPress 生成，供 Claude 读取多篇文章的原稿、来源和整理参考。",
+        "",
+    ]
+    for idx, (article, creator, video, transcript) in enumerate(rows, start=1):
+        transcript_body, transcript_label = _transcript_text(transcript)
+        content_md = strip_background_notes_md(article.content_md or "").strip()
+        lines.extend(
+            [
+                f"## {idx}. {article.title}",
+                "",
+                f"- 文章 ID: `{article.id}`",
+                f"- 创作者: {creator.name} ({creator.handle})",
+                f"- 来源链接: {video.source_url}",
+                f"- 发布时间: {_md_scalar(article.published_at)}",
+                f"- 标签: {', '.join(article.tags) if article.tags else '—'}",
+                f"- 摘要: {_md_scalar(article.summary)}",
+                "",
+            ]
+        )
+        if transcript_body:
+            lines.extend([f"### {transcript_label}", "", transcript_body, ""])
+        else:
+            lines.extend(["### 逐字稿", "", "（当前文章暂无逐字稿，下面提供整理稿作为参考。）", ""])
+        if content_md:
+            lines.extend(["### VoxPress 当前整理稿（参考）", "", content_md, ""])
+        lines.append("---")
+        lines.append("")
+    return "\n".join(lines).strip() + "\n"
+
+
+@router.post("/share/claude", response_model=ArticleClaudeShareOut)
+async def create_claude_article_share(
+    payload: ArticleShareIn,
+    s: AsyncSession = Depends(get_session),
+) -> ArticleClaudeShareOut:
+    requested_ids = list(dict.fromkeys(payload.article_ids))
+    rows = (
+        await s.execute(
+            select(Article, Creator, Video, Transcript)
+            .join(Creator, Creator.id == Article.creator_id)
+            .join(Video, Video.id == Article.video_id)
+            .outerjoin(Transcript, Transcript.video_id == Article.video_id)
+            .where(Article.id.in_(requested_ids))
+        )
+    ).all()
+    row_map = {
+        article.id: (article, creator, video, transcript)
+        for article, creator, video, transcript in rows
+    }
+    ordered_rows = [row_map[article_id] for article_id in requested_ids if article_id in row_map]
+    if not ordered_rows:
+        raise NotFound("selected articles not found")
+
+    created_at = datetime.now(tz=timezone.utc)
+    share_id = uuid.uuid4().hex
+    file_name = (
+        f"voxpress-claude-{created_at.strftime('%Y%m%d-%H%M%S')}-"
+        f"{_filename_slug(ordered_rows[0][0].title)}-{share_id[:8]}.md"
+    )
+    share_path = _share_dir() / file_name
+    _cleanup_old_shares(share_path.parent)
+    share_path.write_text(
+        _build_claude_bundle(ordered_rows, created_at=created_at),
+        encoding="utf-8",
+    )
+    missing_ids = [article_id for article_id in requested_ids if article_id not in row_map]
+    return ArticleClaudeShareOut(
+        share_id=share_id,
+        file_name=file_name,
+        article_count=len(ordered_rows),
+        download_url=f"/api/articles/share/{file_name}",
+        local_file_path=str(share_path),
+        created_at=created_at,
+        articles=[
+            ArticleShareItemOut(id=article.id, title=article.title, creator_name=creator.name)
+            for article, creator, _, _ in ordered_rows
+        ],
+        missing_ids=missing_ids,
+    )
+
+
+@router.get("/share/{file_name}")
+async def download_claude_article_share(file_name: str) -> FileResponse:
+    if "/" in file_name or "\\" in file_name or not file_name.endswith(".md"):
+        raise NotFound("share file not found")
+    path = _share_dir() / file_name
+    if not path.exists() or not path.is_file():
+        raise NotFound("share file not found")
+    return FileResponse(
+        path,
+        media_type="text/markdown; charset=utf-8",
+        filename=file_name,
+    )
+
+
 @router.get("", response_model=Page[ArticleOut])
 async def list_articles(
     s: AsyncSession = Depends(get_session),
+    sort: str = Query("published_at:desc"),
     q: str | None = None,
     creator_id: int | None = None,
     tag: str | None = None,
@@ -79,7 +250,7 @@ async def list_articles(
             predicate = Article.published_at >= datetime.now(tz=timezone.utc) - timedelta(days=days)
             stmt = stmt.where(predicate)
             total_stmt = total_stmt.where(predicate)
-    stmt = stmt.order_by(Article.published_at.desc(), Article.id.desc()).offset(offset).limit(limit)
+    stmt = stmt.order_by(*_article_sort_order(sort)).offset(offset).limit(limit)
 
     rows = (await s.execute(stmt)).all()
     items = [article for article, _ in rows]

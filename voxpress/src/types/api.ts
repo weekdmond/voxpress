@@ -79,6 +79,23 @@ export interface ArticleBatchResult {
   missing_ids: string[];
 }
 
+export interface ArticleShareItem {
+  id: string;
+  title: string;
+  creator_name: string;
+}
+
+export interface ArticleClaudeShare {
+  share_id: string;
+  file_name: string;
+  article_count: number;
+  download_url: string;
+  local_file_path: string;
+  created_at: ISO8601;
+  articles: ArticleShareItem[];
+  missing_ids: string[];
+}
+
 export interface TaskBatchResult {
   tasks: Task[];
 }
@@ -154,6 +171,7 @@ export interface Task {
   detail: string | null;
   article_id: string | null;
   article_title: string | null;
+  duration_sec: number;
   cover_url: string | null;
   error: string | null;
   trigger_kind: TaskTriggerKind;

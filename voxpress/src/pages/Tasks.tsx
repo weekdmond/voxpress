@@ -7,8 +7,9 @@ import { Icon } from '@/components/primitives';
 import { TaskChainBar, STAGE_LABEL } from '@/components/Task/TaskChainBar';
 import { TaskCover } from '@/components/Task/TaskCover';
 import { TaskDrawer } from '@/components/Task/TaskDrawer';
+import { useCrossPageSelection } from '@/hooks/useCrossPageSelection';
 import { api } from '@/lib/api';
-import { formatDuration, formatRelative } from '@/lib/format';
+import { formatDateTime, formatDuration, formatRelative } from '@/lib/format';
 import { subscribeTasks } from '@/lib/sse';
 import type {
   Page as ApiPage,
@@ -63,6 +64,16 @@ const STAGE_OPTIONS = [
 
 const PAGE_SIZE = 20;
 
+interface ParsedTaskListParams {
+  status: string;
+  stage: string;
+  model: string;
+  since: string;
+  q: string;
+  limit: number;
+  offset: number;
+}
+
 function fmtTokens(n: number): string {
   if (!n) return '—';
   if (n >= 10000) return `${(n / 10000).toFixed(1)}w`;
@@ -85,6 +96,56 @@ function labelFromTitle(t: string): string {
   return m ? m[0] : 'VP';
 }
 
+function parseTaskListParams(raw: string): ParsedTaskListParams {
+  const params = new URLSearchParams(raw);
+  return {
+    status: params.get('status') || 'all',
+    stage: params.get('stage') || 'all',
+    model: params.get('model') || 'all',
+    since: params.get('since') || 'all',
+    q: (params.get('q') || '').trim().toLowerCase(),
+    limit: Math.max(1, Number(params.get('limit') || PAGE_SIZE)),
+    offset: Math.max(0, Number(params.get('offset') || 0)),
+  };
+}
+
+function taskMatchesListParams(task: Task, params: ParsedTaskListParams): boolean {
+  if (params.status !== 'all' && params.status !== 'active' && task.status !== params.status) return false;
+  if (params.status === 'active' && task.status !== 'queued' && task.status !== 'running') return false;
+  if (params.stage !== 'all' && task.stage !== params.stage) return false;
+  if (params.model !== 'all') {
+    const models = [task.primary_model, ...(((task as Task & { models?: Array<string | null> }).models ?? []))]
+      .filter((value): value is string => Boolean(value));
+    if (!models.includes(params.model)) return false;
+  }
+  if (params.since !== 'all') {
+    const startedAt = Date.parse(task.started_at);
+    if (Number.isFinite(startedAt)) {
+      const now = Date.now();
+      if (params.since === '1h' && startedAt < now - 3600_000) return false;
+      if (params.since === '24h') {
+        const startOfDay = new Date();
+        startOfDay.setHours(0, 0, 0, 0);
+        if (startedAt < startOfDay.getTime()) return false;
+      }
+      if (params.since === '7d' && startedAt < now - 7 * 86_400_000) return false;
+      if (params.since === '30d' && startedAt < now - 30 * 86_400_000) return false;
+    }
+  }
+  if (params.q) {
+    const haystack = [
+      task.id,
+      task.title_guess,
+      task.article_title ?? '',
+      task.creator_name ?? '',
+    ]
+      .join(' ')
+      .toLowerCase();
+    if (!haystack.includes(params.q)) return false;
+  }
+  return true;
+}
+
 function statusDot(status: TaskStatus | SystemJobStatus): string {
   if (status === 'done') return s.stDotDone;
   if (status === 'running') return s.stDotRunning;
@@ -98,6 +159,10 @@ function systemStageLabel(status: SystemJobStatus): string {
   if (status === 'running') return 'RUNNING';
   if (status === 'failed') return 'FAILED';
   return 'SKIPPED';
+}
+
+function systemTriggerLabel(kind: SystemJobRun['trigger_kind']): string {
+  return kind === 'manual' ? '手动执行' : '定时执行';
 }
 
 interface DropdownProps {
@@ -182,7 +247,10 @@ export function TasksPage() {
     enabled: !isSystem,
   });
   const statusCounts = summary?.status_counts ?? {};
-  const totalCount = Object.values(statusCounts).reduce((a, b) => a + b, 0);
+  const totalCount = ['running', 'queued', 'done', 'failed', 'canceled'].reduce(
+    (total, key) => total + (statusCounts[key] ?? 0),
+    0,
+  );
 
   const { data: systemSummary } = useQuery({
     queryKey: ['system-jobs', 'summary'],
@@ -214,6 +282,11 @@ export function TasksPage() {
   const tasks = listPage?.items ?? [];
   const listTotal = listPage?.total ?? tasks.length;
   const totalPages = Math.max(1, Math.ceil(listTotal / PAGE_SIZE));
+  const selectionScope = useMemo(
+    () => JSON.stringify({ scope, tab, model, stage, time, q: qStr.trim().toLowerCase() }),
+    [scope, tab, model, stage, time, qStr],
+  );
+  const selection = useCrossPageSelection(selectionScope, tasks);
 
   const systemParams = useMemo(() => {
     const p = new URLSearchParams();
@@ -243,47 +316,60 @@ export function TasksPage() {
         qc.invalidateQueries({ queryKey: ['tasks'] });
         return;
       }
-      qc.setQueriesData<ApiPage<Task>>({ queryKey: ['tasks', 'list'] }, (data) => {
-        if (!data) return data;
-        const t = e.task as Task;
+      const t = e.task as Task;
+      selection.upsertItem(t);
+      const cachedLists = qc.getQueriesData<ApiPage<Task>>({ queryKey: ['tasks', 'list'] });
+      cachedLists.forEach(([queryKey, data]) => {
+        if (!data || !Array.isArray(queryKey) || queryKey.length < 3 || typeof queryKey[2] !== 'string') return;
+        const params = parseTaskListParams(queryKey[2]);
+        const matches = taskMatchesListParams(t, params);
         const idx = data.items.findIndex((x) => x.id === t.id);
-        if (idx === -1) {
-          if (e.type === 'create') {
-            return { ...data, items: [t, ...data.items].slice(0, PAGE_SIZE) };
+
+        if (params.offset > 0) {
+          if (idx !== -1 || matches) {
+            qc.invalidateQueries({ queryKey });
           }
-          return data;
+          return;
         }
-        const items = [...data.items];
-        items[idx] = t;
-        return { ...data, items };
+
+        if (idx === -1 && !matches) return;
+        if (idx !== -1 && matches) {
+          const items = [...data.items];
+          items[idx] = t;
+          qc.setQueryData<ApiPage<Task>>(queryKey, { ...data, items });
+          return;
+        }
+        if (idx !== -1 && !matches) {
+          const items = data.items.filter((x) => x.id !== t.id);
+          qc.setQueryData<ApiPage<Task>>(queryKey, {
+            ...data,
+            items,
+            total: Math.max(0, (data.total ?? data.items.length) - 1),
+          });
+          return;
+        }
+        if (idx === -1 && matches) {
+          qc.setQueryData<ApiPage<Task>>(queryKey, {
+            ...data,
+            items: [t, ...data.items].slice(0, params.limit),
+            total: (data.total ?? data.items.length) + 1,
+          });
+        }
       });
+      if (e.type === 'create') {
+        qc.invalidateQueries({ queryKey: ['tasks', 'summary'] });
+      }
       if (e.type === 'update' && (e.task.status === 'done' || e.task.status === 'failed')) {
         qc.invalidateQueries({ queryKey: ['tasks', 'summary'] });
       }
     });
-  }, [isSystem, qc]);
+  }, [isSystem, qc, selection.upsertItem]);
 
   // ─── Selection ───────────────────────────────────
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  useEffect(() => setSelected(new Set()), [listParams]);
-  const toggleOne = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-  const toggleAll = () => {
-    setSelected((prev) => {
-      if (prev.size === tasks.length && tasks.length > 0) return new Set();
-      return new Set(tasks.map((t) => t.id));
-    });
-  };
   const allCbxCls =
-    selected.size === 0
+    !selection.someOnPageSelected
       ? s.cbx
-      : selected.size === tasks.length
+      : selection.allOnPageSelected
       ? [s.cbx, s.cbxOn].join(' ')
       : [s.cbx, s.cbxIndet].join(' ');
 
@@ -303,7 +389,7 @@ export function TasksPage() {
       api.post<TaskRerunResult>('/api/tasks/rerun', { task_ids: ids, mode: 'resume' }),
     onSuccess: (r) => {
       toast.success(`已加入重跑队列 · 成功 ${r.processed} / ${r.requested}`);
-      setSelected(new Set());
+      selection.clearSelection();
       qc.invalidateQueries({ queryKey: ['tasks'] });
     },
     onError: (e: Error) => toast.error(e.message || '重跑失败'),
@@ -313,7 +399,7 @@ export function TasksPage() {
       api.post<TaskCancelResult>('/api/tasks/cancel', { task_ids: ids }),
     onSuccess: (r) => {
       toast.success(`已取消 ${r.processed} / ${r.requested} 个任务`);
-      setSelected(new Set());
+      selection.clearSelection();
       qc.invalidateQueries({ queryKey: ['tasks'] });
     },
     onError: (e: Error) => toast.error(e.message || '取消失败'),
@@ -335,6 +421,14 @@ export function TasksPage() {
       qc.invalidateQueries({ queryKey: ['tasks'] });
     },
     onError: (e: Error) => toast.error(e.message || '取消失败'),
+  });
+  const runSystemJob = useMutation({
+    mutationFn: () => api.post<SystemJobRun>('/api/system-jobs/creator_refresh/run'),
+    onSuccess: () => {
+      toast.success('已开始手动执行博主刷新');
+      qc.invalidateQueries({ queryKey: ['system-jobs'] });
+    },
+    onError: (e: Error) => toast.error(e.message || '手动执行失败'),
   });
 
   const refresh = () => {
@@ -372,13 +466,13 @@ export function TasksPage() {
 
   const submitSearch = () => setFilter({ q: qDraft.trim() });
 
-  const selectedIds = Array.from(selected);
+  const selectedIds = selection.selectedIds;
   const selectedHint = useMemo(() => {
-    const sel = tasks.filter((t) => selected.has(t.id));
+    const sel = selection.selectedItems;
     const failedN = sel.filter((t) => t.status === 'failed').length;
     const estCost = sel.reduce((a, t) => a + (t.cost_cny ?? 0), 0) * 0.6;
     return `预计消耗 ¥${estCost.toFixed(2)}${failedN ? ` · ${failedN} 条失败将从断点续跑` : ''}`;
-  }, [tasks, selected]);
+  }, [selection.selectedItems]);
 
   const pagerShown = isSystem ? systemTotalPages > 1 : totalPages > 1;
 
@@ -414,6 +508,16 @@ export function TasksPage() {
       </div>
 
       <div className={s.headActions} style={{ justifyContent: 'flex-end', marginTop: -12 }}>
+        {isSystem ? (
+          <button
+            className={[s.plainBtn, s.ghostBtn].join(' ')}
+            onClick={() => runSystemJob.mutate()}
+            disabled={runSystemJob.isPending || (systemStatusCounts.running ?? 0) > 0}
+          >
+            <Icon name="refresh" size={13} />{' '}
+            {runSystemJob.isPending || (systemStatusCounts.running ?? 0) > 0 ? '执行中' : '手动执行'}
+          </button>
+        ) : null}
         <button className={[s.plainBtn, s.ghostBtn].join(' ')} onClick={refresh}>
           <Icon name="refresh" size={13} /> 刷新
         </button>
@@ -587,14 +691,14 @@ export function TasksPage() {
       </div>
 
       {/* Bulk bar */}
-      {!isSystem && selected.size > 0 ? (
+      {!isSystem && selection.selectedCount > 0 ? (
         <div className={s.bulkBar}>
           <span className={s.bulkCount}>
-            <b>{selected.size}</b>已选
+            <b>{selection.selectedCount}</b>已选
           </span>
-          <span className={s.bulkHint}>— {selectedHint}</span>
+          <span className={s.bulkHint}>— 当前页 {selection.pageSelectedCount} 条 · {selectedHint}</span>
           <span className={s.bulkSpacer} />
-          <button className={s.bulkBtn} onClick={() => setSelected(new Set())}>
+          <button className={s.bulkBtn} onClick={selection.clearSelection}>
             取消选择
           </button>
           <button
@@ -621,13 +725,14 @@ export function TasksPage() {
             <>
               <div className={s.tHead}>
                 <span>
-                  <button className={allCbxCls} onClick={toggleAll} aria-label="全选" />
+                  <button className={allCbxCls} onClick={selection.toggleAllOnPage} aria-label="全选" />
                 </span>
                 <span />
                 <span>任务 ID</span>
                 <span>文章 / 博主</span>
                 <span>任务链</span>
                 <span>成本 · Token · 耗时</span>
+                <span>执行时间</span>
                 <span />
               </div>
 
@@ -635,7 +740,7 @@ export function TasksPage() {
                 <div className={s.emptyBlock}>暂无匹配的任务</div>
               ) : (
                 tasks.map((t, i) => {
-                  const isSel = selected.has(t.id);
+                  const isSel = selection.isSelected(t.id);
                   const stageLabel =
                     t.status === 'done' ? 'completed' : STAGE_LABEL[t.stage] || t.stage;
                   return (
@@ -655,7 +760,7 @@ export function TasksPage() {
                           aria-checked={isSel}
                           onClick={(e) => {
                             e.stopPropagation();
-                            toggleOne(t.id);
+                            selection.toggleOne(t);
                           }}
                           aria-label="选择"
                         />
@@ -676,7 +781,7 @@ export function TasksPage() {
                             {t.article_title || t.title_guess || '解析中…'}
                           </span>
                           <span className={s.articleAuthor}>
-                            {t.creator_name ?? '—'} · {formatRelative(t.started_at)}
+                            {t.creator_name ?? '—'} · {t.duration_sec ? formatDuration(t.duration_sec) : '—'}
                           </span>
                         </div>
                       </div>
@@ -694,6 +799,10 @@ export function TasksPage() {
                             </>
                           )}
                         </span>
+                      </div>
+                      <div className={s.sysWhen}>
+                        <span>{formatDateTime(t.started_at)}</span>
+                        <span className={s.articleAuthor}>{formatRelative(t.started_at)}</span>
                       </div>
                       <button
                         className={s.rowAct}
@@ -718,7 +827,7 @@ export function TasksPage() {
                 <span>系统任务</span>
                 <span>处理结果</span>
                 <span>耗时</span>
-                <span>最近执行</span>
+                <span>执行时间</span>
               </div>
 
               {systemJobs.length === 0 ? (
@@ -734,7 +843,7 @@ export function TasksPage() {
                     <div className={s.sysMain}>
                       <span className={s.articleTitle}>{job.job_name}</span>
                       <span className={s.articleAuthor}>
-                        {job.scope ?? '系统后台任务'}
+                        {systemTriggerLabel(job.trigger_kind)} · {job.scope ?? '系统后台任务'}
                         {job.detail ? ` · ${job.detail}` : ''}
                       </span>
                       {job.error ? <span className={s.sysError}>{job.error}</span> : null}
@@ -749,8 +858,10 @@ export function TasksPage() {
                     </div>
                     <div className={s.num}>{fmtElapsed(job.duration_ms)}</div>
                     <div className={s.sysWhen}>
-                      <span>{formatRelative(job.started_at)}</span>
-                      <span className={s.articleAuthor}>{job.finished_at ? '已完成' : '进行中'}</span>
+                      <span>{formatDateTime(job.started_at)}</span>
+                      <span className={s.articleAuthor}>
+                        {systemTriggerLabel(job.trigger_kind)} · {formatRelative(job.started_at)}
+                      </span>
                     </div>
                   </div>
                 ))

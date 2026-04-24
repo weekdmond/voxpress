@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useLocation, useParams } from 'react-router-dom';
 
 type RebuildStage = 'auto' | 'download' | 'transcribe' | 'correct' | 'organize';
 const REBUILD_STAGE_OPTIONS: { v: RebuildStage; label: string }[] = [
@@ -9,9 +10,9 @@ const REBUILD_STAGE_OPTIONS: { v: RebuildStage; label: string }[] = [
   { v: 'correct', label: '从校对开始' },
   { v: 'organize', label: '从整理开始' },
 ];
-import { Link, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Page } from '@/layouts/AppShell';
+import { ClaudeShareDialog } from '@/components/ClaudeShare/ClaudeShareDialog';
 import { TaskDrawer } from '@/components/Task/TaskDrawer';
 import { Avatar, Button, Chip, ConfirmDialog, Icon } from '@/components/primitives';
 import {
@@ -23,21 +24,66 @@ import {
   ReaderToolbar,
   SourceCard,
 } from '@/components/Reader/Reader';
-import { api } from '@/lib/api';
+import { api, apiUrl } from '@/lib/api';
+import {
+  ARTICLE_PAGE_SIZE,
+  buildArticleListApiParams,
+  buildArticleListSearchParams,
+  parseArticleListState,
+} from '@/lib/articleList';
 import { formatDuration } from '@/lib/format';
-import type { ArticleDetail, Task, TaskCancelResult, TaskRerunResult } from '@/types/api';
+import type { Article, ArticleDetail, Page as ApiPage, Task, TaskCancelResult, TaskRerunResult } from '@/types/api';
 
 export function ArticlePage() {
   const { id = '' } = useParams<{ id: string }>();
+  const location = useLocation();
   const qc = useQueryClient();
   const [split, setSplit] = useState(true);
   const [fromStage, setFromStage] = useState<RebuildStage>('auto');
   const [taskDrawerId, setTaskDrawerId] = useState<string | null>(null);
   const [confirmRebuild, setConfirmRebuild] = useState(false);
+  const [claudeShareOpen, setClaudeShareOpen] = useState(false);
+  const hasListContext = location.search.length > 1;
+  const listState = parseArticleListState(location.search);
+  const listParams = buildArticleListApiParams(listState).toString();
 
   const { data, isLoading } = useQuery({
     queryKey: ['article', id],
     queryFn: () => api.get<ArticleDetail>(`/api/articles/${id}`),
+  });
+
+  const { data: listPage } = useQuery({
+    queryKey: ['articles', listParams],
+    queryFn: () => api.get<ApiPage<Article>>(`/api/articles?${listParams}`),
+    enabled: hasListContext,
+  });
+
+  const navItems = listPage?.items ?? [];
+  const currentIndex = navItems.findIndex((item) => item.id === id);
+  const totalItems = listPage?.total ?? navItems.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / ARTICLE_PAGE_SIZE));
+  const needsPrevPage = hasListContext && currentIndex === 0 && listState.page > 1;
+  const needsNextPage =
+    hasListContext &&
+    currentIndex === navItems.length - 1 &&
+    navItems.length > 0 &&
+    listState.page < totalPages;
+
+  const prevPageState = { ...listState, page: Math.max(1, listState.page - 1) };
+  const nextPageState = { ...listState, page: listState.page + 1 };
+  const prevPageParams = buildArticleListApiParams(prevPageState).toString();
+  const nextPageParams = buildArticleListApiParams(nextPageState).toString();
+
+  const { data: prevPage } = useQuery({
+    queryKey: ['articles', prevPageParams],
+    queryFn: () => api.get<ApiPage<Article>>(`/api/articles?${prevPageParams}`),
+    enabled: needsPrevPage,
+  });
+
+  const { data: nextPage } = useQuery({
+    queryKey: ['articles', nextPageParams],
+    queryFn: () => api.get<ApiPage<Article>>(`/api/articles?${nextPageParams}`),
+    enabled: needsNextPage,
   });
 
   const rebuild = useMutation({
@@ -82,6 +128,19 @@ export function ArticlePage() {
   }
 
   const art = data;
+  const prevArticle =
+    currentIndex > 0
+      ? navItems[currentIndex - 1]
+      : prevPage?.items?.[prevPage.items.length - 1] ?? null;
+  const nextArticle =
+    currentIndex >= 0 && currentIndex < navItems.length - 1
+      ? navItems[currentIndex + 1]
+      : nextPage?.items?.[0] ?? null;
+  const backToArticles = `/articles${location.search}`;
+  const articleHref = (articleId: string, page: number) => {
+    const search = buildArticleListSearchParams({ ...listState, page }).toString();
+    return search ? `/articles/${articleId}?${search}` : `/articles/${articleId}`;
+  };
 
   return (
     <Page>
@@ -89,17 +148,88 @@ export function ArticlePage() {
         style={{
           display: 'flex',
           alignItems: 'center',
+          justifyContent: 'space-between',
           gap: 12,
+          flexWrap: 'wrap',
           fontFamily: 'var(--vp-font-mono)',
           fontSize: 11.5,
           color: 'var(--vp-ink-3)',
         }}
       >
-        <Link to="/articles" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <Icon name="arrow-left" size={12} /> 文章列表
-        </Link>
-        <span>/</span>
-        <span style={{ color: 'var(--vp-ink-2)' }}>{art.source.creator_snapshot.name}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <Link to={backToArticles} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Icon name="arrow-left" size={12} /> 文章列表
+          </Link>
+          <span>/</span>
+          <span style={{ color: 'var(--vp-ink-2)' }}>{art.source.creator_snapshot.name}</span>
+        </div>
+        {hasListContext ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            {prevArticle ? (
+              <Link
+                to={articleHref(prevArticle.id, currentIndex > 0 ? listState.page : listState.page - 1)}
+                title={prevArticle.title}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  minWidth: 0,
+                  maxWidth: 240,
+                  padding: '6px 10px',
+                  borderRadius: 999,
+                  border: '1px solid var(--vp-line)',
+                  color: 'var(--vp-ink-2)',
+                  background: 'var(--vp-panel)',
+                }}
+              >
+                <Icon name="arrow-left" size={12} />
+                <span
+                  style={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  上一篇
+                </span>
+              </Link>
+            ) : null}
+            {nextArticle ? (
+              <Link
+                to={articleHref(
+                  nextArticle.id,
+                  currentIndex >= 0 && currentIndex < navItems.length - 1
+                    ? listState.page
+                    : listState.page + 1,
+                )}
+                title={nextArticle.title}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  minWidth: 0,
+                  maxWidth: 240,
+                  padding: '6px 10px',
+                  borderRadius: 999,
+                  border: '1px solid var(--vp-line)',
+                  color: 'var(--vp-ink-2)',
+                  background: 'var(--vp-panel)',
+                }}
+              >
+                <span
+                  style={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  下一篇
+                </span>
+                <Icon name="arrow-right" size={12} />
+              </Link>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <Reader>
@@ -155,7 +285,18 @@ export function ArticlePage() {
               >
                 任务面板
               </Button>
-              <Button size="sm" icon={<Icon name="external" size={12} />}>
+              <Button
+                size="sm"
+                onClick={() => setClaudeShareOpen(true)}
+                icon={<Icon name="sparkle" size={12} />}
+              >
+                发给 Claude
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => window.open(apiUrl(`/api/articles/${art.id}/export.md`), '_blank')}
+                icon={<Icon name="external" size={12} />}
+              >
                 导出 .md
               </Button>
               <Button size="sm" icon={<Icon name="tag" size={12} />}>
@@ -204,6 +345,12 @@ export function ArticlePage() {
           onCancel={(taskId) => cancelOne.mutate(taskId)}
         />
       ) : null}
+
+      <ClaudeShareDialog
+        open={claudeShareOpen}
+        articleIds={[art.id]}
+        onClose={() => setClaudeShareOpen(false)}
+      />
 
       <ConfirmDialog
         open={confirmRebuild}

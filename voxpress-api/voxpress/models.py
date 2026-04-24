@@ -17,6 +17,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -339,6 +340,12 @@ class SystemJobRun(Base):
         ),
         Index("idx_system_job_runs_status", "status", "started_at"),
         Index("idx_system_job_runs_job_key", "job_key", "started_at"),
+        Index(
+            "uq_system_job_runs_running_job_key",
+            "job_key",
+            unique=True,
+            postgresql_where=text("status = 'running'"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

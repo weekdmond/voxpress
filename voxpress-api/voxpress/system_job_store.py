@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from voxpress.db import session_scope
 from voxpress.models import SystemJobRun
@@ -11,6 +12,19 @@ from voxpress.models import SystemJobRun
 
 def _utc_now() -> datetime:
     return datetime.now(tz=timezone.utc)
+
+
+class SystemJobAlreadyRunning(Exception):
+    def __init__(self, job_key: str) -> None:
+        super().__init__(job_key)
+        self.job_key = job_key
+
+
+def _is_running_job_conflict(exc: IntegrityError) -> bool:
+    constraint_name = getattr(getattr(exc, "orig", None), "constraint_name", "")
+    return constraint_name == "uq_system_job_runs_running_job_key" or (
+        "uq_system_job_runs_running_job_key" in str(exc.orig)
+    )
 
 
 async def start_system_job_run(
@@ -21,18 +35,23 @@ async def start_system_job_run(
     scope: str | None = None,
     detail: str | None = None,
 ) -> UUID:
-    async with session_scope() as s:
-        row = SystemJobRun(
-            job_key=job_key,
-            job_name=job_name,
-            trigger_kind=trigger_kind,
-            status="running",
-            scope=scope,
-            detail=detail,
-        )
-        s.add(row)
-        await s.flush()
-        return row.id
+    try:
+        async with session_scope() as s:
+            row = SystemJobRun(
+                job_key=job_key,
+                job_name=job_name,
+                trigger_kind=trigger_kind,
+                status="running",
+                scope=scope,
+                detail=detail,
+            )
+            s.add(row)
+            await s.flush()
+            return row.id
+    except IntegrityError as exc:
+        if _is_running_job_conflict(exc):
+            raise SystemJobAlreadyRunning(job_key) from exc
+        raise
 
 
 async def finish_system_job_run(
@@ -61,4 +80,3 @@ async def finish_system_job_run(
         row.finished_at = now
         if row.started_at:
             row.duration_ms = max(0, int((now - row.started_at).total_seconds() * 1000))
-
