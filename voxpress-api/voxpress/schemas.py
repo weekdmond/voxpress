@@ -164,6 +164,16 @@ class ArticleOut(BaseModel):
     updated_at: datetime
 
 
+class ArticleFacetItemOut(BaseModel):
+    value: str
+    count: int
+
+
+class ArticleFacetsOut(BaseModel):
+    topics: list[ArticleFacetItemOut] = Field(default_factory=list)
+    tags: list[ArticleFacetItemOut] = Field(default_factory=list)
+
+
 class TranscriptSegmentOut(BaseModel):
     ts_sec: int
     text: str

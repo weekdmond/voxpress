@@ -100,6 +100,37 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
   }
 
   // Articles
+  if (method === 'GET' && path === '/api/articles/facets') {
+    const q = params.get('q')?.toLowerCase() ?? '';
+    const creatorId = params.get('creator_id');
+    const tag = params.get('tag');
+    const topic = params.get('topic');
+    const since = params.get('since');
+    let base: Article[] = [...articles];
+    if (q) base = base.filter((a) => a.title.toLowerCase().includes(q) || a.summary.toLowerCase().includes(q) || a.content_md.toLowerCase().includes(q));
+    if (creatorId) base = base.filter((a) => a.creator_id === Number(creatorId));
+    if (since && since.endsWith('d')) {
+      const days = Number(since.slice(0, -1));
+      if (days > 0) {
+        const cutoff = Date.now() - days * 86_400_000;
+        base = base.filter((a) => Date.parse(a.published_at) >= cutoff);
+      }
+    }
+    const topicItems = tag ? base.filter((a) => a.tags.includes(tag)) : base;
+    const tagItems = topic ? base.filter((a) => a.topics.includes(topic)) : base;
+    const countValues = (items: Article[], key: 'tags' | 'topics') => {
+      const counts = new Map<string, number>();
+      items.forEach((a) => a[key].forEach((value) => counts.set(value, (counts.get(value) ?? 0) + 1)));
+      return Array.from(counts.entries())
+        .sort(([, a], [, b]) => b - a)
+        .map(([value, count]) => ({ value, count }));
+    };
+    return delay({
+      topics: countValues(topicItems, 'topics'),
+      tags: countValues(tagItems, 'tags'),
+    });
+  }
+
   if (method === 'GET' && path === '/api/articles') {
     const q = params.get('q')?.toLowerCase() ?? '';
     const creatorId = params.get('creator_id');

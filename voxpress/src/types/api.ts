@@ -7,6 +7,11 @@ export interface Page<T> {
   total?: number;
 }
 
+export interface FacetItem {
+  value: string;
+  count: number;
+}
+
 export interface Health {
   ok: boolean;
   version: string;
@@ -81,6 +86,11 @@ export interface Article {
   published_at: ISO8601;
   created_at: ISO8601;
   updated_at: ISO8601;
+}
+
+export interface ArticleFacets {
+  topics: FacetItem[];
+  tags: FacetItem[];
 }
 
 export interface ArticleBatchResult {

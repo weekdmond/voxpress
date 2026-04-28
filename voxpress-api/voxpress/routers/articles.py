@@ -26,6 +26,8 @@ from voxpress.schemas import (
     ArticleClaudeShareOut,
     ArticleClaudeWritebackIn,
     ArticleClaudeWritebackOut,
+    ArticleFacetItemOut,
+    ArticleFacetsOut,
     ArticleOut,
     ArticlePatch,
     ArticleRebuildIn,
@@ -68,6 +70,59 @@ def _article_sort_order(sort: str) -> list[Any]:
     primary = expr.desc().nulls_last() if desc else expr.asc().nulls_last()
     tie_breaker = Article.id.desc() if desc else Article.id.asc()
     return [primary, tie_breaker]
+
+
+def _article_filter_predicates(
+    *,
+    q: str | None = None,
+    creator_id: int | None = None,
+    tag: str | None = None,
+    topic: str | None = None,
+    since: str | None = None,
+    include_tag: bool = True,
+    include_topic: bool = True,
+) -> list[Any]:
+    predicates: list[Any] = []
+    if q:
+        like = f"%{q}%"
+        predicates.append(
+            Article.title.ilike(like) | Article.summary.ilike(like) | Article.content_md.ilike(like)
+        )
+    if creator_id:
+        predicates.append(Article.creator_id == creator_id)
+    if include_tag and tag:
+        predicates.append(Article.tags.any(tag))
+    if include_topic and topic:
+        predicates.append(Article.topics.any(topic))
+    if since and since.endswith("d"):
+        try:
+            days = int(since[:-1])
+        except ValueError:
+            days = 0
+        if days > 0:
+            predicates.append(Article.published_at >= datetime.now(tz=timezone.utc) - timedelta(days=days))
+    return predicates
+
+
+async def _array_facets(
+    s: AsyncSession,
+    column,
+    *,
+    predicates: list[Any],
+    limit: int,
+) -> list[ArticleFacetItemOut]:
+    value = func.unnest(column).label("value")
+    count = func.count().label("count")
+    stmt = (
+        select(value, count)
+        .select_from(Article)
+        .where(*predicates)
+        .group_by(value)
+        .order_by(count.desc(), value.asc())
+        .limit(limit)
+    )
+    rows = (await s.execute(stmt)).all()
+    return [ArticleFacetItemOut(value=str(item), count=int(item_count)) for item, item_count in rows if item]
 
 
 def _share_dir() -> Path:
@@ -360,6 +415,38 @@ async def download_claude_article_share(file_name: str) -> FileResponse:
     )
 
 
+@router.get("/facets", response_model=ArticleFacetsOut)
+async def article_facets(
+    s: AsyncSession = Depends(get_session),
+    q: str | None = None,
+    creator_id: int | None = None,
+    tag: str | None = None,
+    topic: str | None = None,
+    since: str | None = None,
+    limit: int = Query(100, ge=1, le=200),
+) -> ArticleFacetsOut:
+    topic_predicates = _article_filter_predicates(
+        q=q,
+        creator_id=creator_id,
+        tag=tag,
+        topic=topic,
+        since=since,
+        include_topic=False,
+    )
+    tag_predicates = _article_filter_predicates(
+        q=q,
+        creator_id=creator_id,
+        tag=tag,
+        topic=topic,
+        since=since,
+        include_tag=False,
+    )
+    return ArticleFacetsOut(
+        topics=await _array_facets(s, Article.topics, predicates=topic_predicates, limit=limit),
+        tags=await _array_facets(s, Article.tags, predicates=tag_predicates, limit=limit),
+    )
+
+
 @router.get("", response_model=Page[ArticleOut])
 async def list_articles(
     s: AsyncSession = Depends(get_session),
@@ -375,32 +462,9 @@ async def list_articles(
     latest_task_id = _latest_task_id_subquery(Article.id, Article.video_id).label("latest_task_id")
     stmt = select(Article, latest_task_id)
     total_stmt = select(func.count()).select_from(Article)
-    if q:
-        like = f"%{q}%"
-        predicate = Article.title.ilike(like) | Article.summary.ilike(like) | Article.content_md.ilike(like)
-        stmt = stmt.where(predicate)
-        total_stmt = total_stmt.where(predicate)
-    if creator_id:
-        predicate = Article.creator_id == creator_id
-        stmt = stmt.where(predicate)
-        total_stmt = total_stmt.where(predicate)
-    if tag:
-        predicate = Article.tags.any(tag)
-        stmt = stmt.where(predicate)
-        total_stmt = total_stmt.where(predicate)
-    if topic:
-        predicate = Article.topics.any(topic)
-        stmt = stmt.where(predicate)
-        total_stmt = total_stmt.where(predicate)
-    if since and since.endswith("d"):
-        try:
-            days = int(since[:-1])
-        except ValueError:
-            days = 0
-        if days > 0:
-            predicate = Article.published_at >= datetime.now(tz=timezone.utc) - timedelta(days=days)
-            stmt = stmt.where(predicate)
-            total_stmt = total_stmt.where(predicate)
+    predicates = _article_filter_predicates(q=q, creator_id=creator_id, tag=tag, topic=topic, since=since)
+    stmt = stmt.where(*predicates)
+    total_stmt = total_stmt.where(*predicates)
     stmt = stmt.order_by(*_article_sort_order(sort)).offset(offset).limit(limit)
 
     rows = (await s.execute(stmt)).all()

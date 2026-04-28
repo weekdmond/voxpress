@@ -97,3 +97,11 @@ export function buildArticleListApiParams(state: ArticleListState): URLSearchPar
   params.set('offset', String((state.page - 1) * ARTICLE_PAGE_SIZE));
   return params;
 }
+
+export function buildArticleFacetApiParams(state: ArticleListState): URLSearchParams {
+  const params = buildArticleListSearchParams({ ...state, page: 1 });
+  params.delete('page');
+  params.delete('sort');
+  params.set('limit', '100');
+  return params;
+}

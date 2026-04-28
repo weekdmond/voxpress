@@ -13,6 +13,7 @@ import {
   ARTICLE_SORT_OPTIONS,
   ARTICLE_TIME_OPTIONS,
   DEFAULT_ARTICLE_LIST_STATE,
+  buildArticleFacetApiParams,
   buildArticleListApiParams,
   buildArticleListSearchParams,
   parseArticleListState,
@@ -22,6 +23,7 @@ import { mediaCandidates } from '@/lib/media';
 import { formatCount, formatDateTime, formatDuration } from '@/lib/format';
 import type {
   Article,
+  ArticleFacets,
   Creator,
   Page as ApiPage,
   Task,
@@ -201,10 +203,17 @@ export function ArticlesPage() {
   const listParams = useMemo(() => {
     return buildArticleListApiParams(listState).toString();
   }, [listState]);
+  const facetParams = useMemo(() => {
+    return buildArticleFacetApiParams(listState).toString();
+  }, [listState]);
 
   const { data: listPage } = useQuery({
     queryKey: ['articles', listParams],
     queryFn: () => api.get<ApiPage<Article>>(`/api/articles?${listParams}`),
+  });
+  const { data: facets } = useQuery({
+    queryKey: ['articles', 'facets', facetParams],
+    queryFn: () => api.get<ArticleFacets>(`/api/articles/facets?${facetParams}`),
   });
 
   const { data: creatorsPage } = useQuery({
@@ -226,22 +235,6 @@ export function ArticlesPage() {
     [creatorFilter, time, tagFilter, topicFilter, q, sort],
   );
   const selection = useCrossPageSelection(selectionScope, articles);
-
-  const topicFacets = useMemo(() => {
-    const counts = new Map<string, number>();
-    articles.forEach((a) => a.topics.forEach((t) => counts.set(t, (counts.get(t) ?? 0) + 1)));
-    return Array.from(counts.entries())
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 12);
-  }, [articles]);
-
-  const tagFacets = useMemo(() => {
-    const counts = new Map<string, number>();
-    articles.forEach((a) => a.tags.forEach((t) => counts.set(t, (counts.get(t) ?? 0) + 1)));
-    return Array.from(counts.entries())
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 12);
-  }, [articles]);
 
   const rebuildMut = useMutation({
     mutationFn: async ({ ids, fromStage }: { ids: string[]; fromStage: RebuildStage }) => {
@@ -369,17 +362,17 @@ export function ArticlesPage() {
     const opts: { v: string; label: string; count?: number }[] = [
       { v: 'all', label: '全部', count: listTotal },
     ];
-    tagFacets.forEach(([t, c]) => opts.push({ v: t, label: `#${t}`, count: c }));
+    facets?.tags.forEach((item) => opts.push({ v: item.value, label: `#${item.value}`, count: item.count }));
     return opts;
-  }, [tagFacets, listTotal]);
+  }, [facets, listTotal]);
 
   const topicOptions = useMemo(() => {
     const opts: { v: string; label: string; count?: number }[] = [
       { v: 'all', label: '全部', count: listTotal },
     ];
-    topicFacets.forEach(([t, c]) => opts.push({ v: t, label: t, count: c }));
+    facets?.topics.forEach((item) => opts.push({ v: item.value, label: item.value, count: item.count }));
     return opts;
-  }, [topicFacets, listTotal]);
+  }, [facets, listTotal]);
 
   const selCount = selection.selectedCount;
   const selectedIds = selection.selectedIds;
@@ -424,7 +417,7 @@ export function ArticlesPage() {
           openId={openDrop}
           setOpenId={setOpenDrop}
           onSelect={(value) => updateListState({ topicFilter: value }, { resetPage: true })}
-          headerLabel={topicFacets.length ? '高频主题' : undefined}
+          headerLabel={facets?.topics.length ? '全库主题' : undefined}
         />
         <Dropdown
           id="tag"
@@ -434,7 +427,7 @@ export function ArticlesPage() {
           openId={openDrop}
           setOpenId={setOpenDrop}
           onSelect={(value) => updateListState({ tagFilter: value }, { resetPage: true })}
-          headerLabel={tagFacets.length ? '高频标签' : undefined}
+          headerLabel={facets?.tags.length ? '全库标签' : undefined}
         />
         <Dropdown
           id="sort"
