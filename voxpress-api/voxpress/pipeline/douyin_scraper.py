@@ -106,7 +106,7 @@ async def scrape_user_page(
 ) -> ScrapedUserPage:
     if not cookie or not cookie.strip():
         raise ScrapeError(
-            "抖音博主主页需要登录 Cookie。请在 /settings 导入一份真实浏览器 Cookie。"
+            "抖音创作者主页需要登录 Cookie。请在 /settings 导入一份真实浏览器 Cookie。"
         )
 
     from f2.apps.douyin.handler import DouyinHandler
@@ -118,16 +118,16 @@ async def scrape_user_page(
         prof = await handler.fetch_user_profile(sec_uid)
         pdict = _to_dict(prof)
     except Exception as e:
-        raise ScrapeError(_format_f2_error("拉取博主资料失败", e)) from e
+        raise ScrapeError(_format_f2_error("拉取创作者资料失败", e)) from e
     if not pdict or not pdict.get("nickname"):
         raise ScrapeError(
-            "博主资料返回空 — 多半是 Cookie 无效 / 过期 / 未登录。"
+            "创作者资料返回空 — 多半是 Cookie 无效 / 过期 / 未登录。"
             "请到 /settings 重新粘一份从已登录浏览器导出的 Cookie。"
         )
 
     creator = ScrapedCreator(
         sec_uid=sec_uid,
-        name=str(pdict.get("nickname") or "未命名博主"),
+        name=str(pdict.get("nickname") or "未命名创作者"),
         handle=f"@{pdict.get('unique_id') or pdict.get('short_id') or sec_uid[:12]}",
         bio=(pdict.get("signature") or "").strip() or None,
         region=pdict.get("ip_location") or pdict.get("country") or None,

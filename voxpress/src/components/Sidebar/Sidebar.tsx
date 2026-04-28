@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Icon } from '@/components/primitives';
 import { Avatar } from '@/components/primitives';
 import { api } from '@/lib/api';
-import type { Creator, Page } from '@/types/api';
+import { formatDateTime } from '@/lib/format';
+import type { Creator, Health, Page } from '@/types/api';
 import type { IconName } from '@/components/primitives';
 import s from './Sidebar.module.css';
 import { useSseStatus } from '@/features/tasks/useSseStatus';
@@ -24,11 +25,17 @@ export function Sidebar() {
     queryFn: () => api.get<Page<Creator>>('/api/creators?sort=followers:desc'),
     staleTime: 60_000,
   });
+  const { data: health } = useQuery({
+    queryKey: ['health', 'sidebar'],
+    queryFn: () => api.get<Health>('/api/health'),
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+  });
   const recent = (creators?.items ?? []).slice(0, 6);
 
   const items: NavItem[] = [
     { to: '/', label: '首页', icon: 'home', end: true },
-    { to: '/library', label: '博主库', icon: 'users', count: creators?.total },
+    { to: '/library', label: '来源库', icon: 'users', count: creators?.total },
     { to: '/tasks', label: '任务', icon: 'swap' },
     { to: '/articles', label: '文章', icon: 'doc' },
     { to: '/settings', label: '设置', icon: 'cog' },
@@ -36,15 +43,19 @@ export function Sidebar() {
 
   const status = useSseStatus();
   const statusLabel =
-    status === 'open' ? '本地服务 · 运行中' : status === 'connecting' ? '连接中' : '已断开';
+    status === 'open' ? 'SpeechFolio 服务 · 运行中' : status === 'connecting' ? '连接中' : '已断开';
   const statusCls = status === 'open' ? s.ok : status === 'connecting' ? s.warn : s.bad;
+  const deployLabel = health?.deploy_commit
+    ? `${health.version} · ${health.deploy_commit.slice(0, 7)}`
+    : health?.version ?? 'v0.4.0';
+  const deployedAtLabel = health?.deployed_at ? formatDateTime(health.deployed_at) : '未部署';
 
   return (
     <aside className={s.sidebar}>
       <div className={s.brand}>
-        <div className={s.brandMark}>V</div>
+        <div className={s.brandMark}>S</div>
         <div>
-          <div className={s.brandName}>VoxPress</div>
+          <div className={s.brandName}>SpeechFolio</div>
         </div>
         <div className={s.brandVersion}>v0.4</div>
       </div>
@@ -67,7 +78,7 @@ export function Sidebar() {
       </nav>
 
       <div className={s.section}>
-        <div className={s.sectionTitle}>最近博主</div>
+        <div className={s.sectionTitle}>最近来源</div>
         <div className={s.recent}>
           {recent.map((c) => (
             <NavLink
@@ -90,6 +101,14 @@ export function Sidebar() {
         <div className={s.statusRow} title={`SSE ${status} · ${loc.pathname}`}>
           <span className={[s.statusDot, statusCls].join(' ')} />
           <span>{statusLabel}</span>
+        </div>
+        <div className={s.metaRow}>
+          <span>版本</span>
+          <b>{deployLabel}</b>
+        </div>
+        <div className={s.metaRow}>
+          <span>更新</span>
+          <b>{deployedAtLabel}</b>
         </div>
       </div>
     </aside>

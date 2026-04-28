@@ -61,9 +61,9 @@ def _job_filters(*, status: str | None, time_range: str | None, q: str | None) -
 
 def _job_name_for_key(job_key: str) -> str:
     if job_key == "creator_refresh":
-        return "博主定时刷新"
+        return "来源定时刷新"
     if job_key == "creator_backfill":
-        return "博主作品补齐"
+        return "来源作品补齐"
     raise ApiError("暂不支持该系统任务", code="unsupported_system_job", status_code=404)
 
 
@@ -217,7 +217,7 @@ async def run_system_job(
             await _raise_running_job_error(s, job_key)
     elif job_key == "creator_backfill":
         if creator_id is None:
-            raise ApiError("补齐博主作品需要 creator_id", code="creator_id_required", status_code=400)
+            raise ApiError("补齐来源作品需要 creator_id", code="creator_id_required", status_code=400)
         try:
             run_id = await start_creator_backfill_run(
                 creator_id=creator_id,
@@ -225,7 +225,7 @@ async def run_system_job(
                 background=True,
             )
         except CreatorBackfillNotFound as e:
-            raise ApiError("博主不存在", code="creator_not_found", status_code=404) from e
+            raise ApiError("创作者不存在", code="creator_not_found", status_code=404) from e
         except SystemJobAlreadyRunning:
             await _raise_running_job_error(s, job_key)
     else:

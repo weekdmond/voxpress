@@ -19,20 +19,43 @@ function absoluteApiUrl(path: string): string {
   return new URL(apiUrl(path), window.location.href).href;
 }
 
-function buildPrompt(share: ArticleClaudeShare, downloadUrl: string, detail: string): string {
+function buildPrompt(
+  share: ArticleClaudeShare,
+  downloadUrl: string,
+  writebackUrl: string,
+  detail: string,
+): string {
   const visibleArticles = share.articles
     .slice(0, 8)
-    .map((article, index) => `${index + 1}. ${article.title} / ${article.creator_name}`)
+    .map(
+      (article, index) =>
+        `${index + 1}. ${article.title} / ${article.creator_name} / article_id=${article.id}`,
+    )
     .join('\n');
   const more =
     share.articles.length > 8 ? `\n...另有 ${share.articles.length - 8} 篇在原稿包中` : '';
   return [
-    '请阅读我从 VoxPress 分享的文章原稿包，然后基于这些原稿协助我写文章。',
+    '请阅读我从 SpeechFolio 分享的文章原稿包，然后基于这些原稿协助我写文章。',
     '',
     `原稿包文件: ${share.file_name}`,
     `下载链接: ${downloadUrl}`,
+    `回写 API: ${writebackUrl}`,
     '',
     '如果当前会话已经附上 Markdown 文件，请直接读取附件；如果没有附件，请先通过下载链接获取原稿包。',
+    '完成重写后，请直接调用回写 API，把重写结果更新回 SpeechFolio，替换原来的文章。',
+    '回写请求体格式如下：',
+    '{',
+    '  "articles": [',
+    '    {',
+    '      "id": "文章 ID",',
+    '      "title": "重写后的标题",',
+    '      "summary": "一句话摘要",',
+    '      "content_md": "# 标题\\n\\n> 摘要\\n\\n正文 Markdown",',
+    '      "tags": ["标签1", "标签2"]',
+    '    }',
+    '  ]',
+    '}',
+    '如果你有命令或 HTTP 调用能力，请直接 POST 到回写 API；如果没有，请至少先产出完全符合上面结构的 JSON。',
     '',
     `文章列表:\n${visibleArticles}${more}`,
     '',
@@ -83,9 +106,10 @@ export function ClaudeShareDialog({ open, articleIds, onClose }: ClaudeShareDial
 
   const share = createShare.data;
   const downloadUrl = share ? absoluteApiUrl(share.download_url) : '';
+  const writebackUrl = share ? absoluteApiUrl(share.writeback_url) : '';
   const prompt = useMemo(
-    () => (share ? buildPrompt(share, downloadUrl, detail) : ''),
-    [share, downloadUrl, detail],
+    () => (share ? buildPrompt(share, downloadUrl, writebackUrl, detail) : ''),
+    [share, downloadUrl, writebackUrl, detail],
   );
   const desktopUrl = useMemo(() => {
     if (!share) return '';
@@ -142,6 +166,10 @@ export function ClaudeShareDialog({ open, articleIds, onClose }: ClaudeShareDial
                 <b>{share.article_count}</b> 篇文章已打包为 <span>{share.file_name}</span>
                 {missingCount ? <em> · {missingCount} 篇未找到</em> : null}
               </div>
+              <div className={s.metaBlock}>
+                <span>回写 API</span>
+                <code>{writebackUrl}</code>
+              </div>
 
               <div className={s.terminal}>
                 <div className={s.terminalTop}>
@@ -170,6 +198,16 @@ export function ClaudeShareDialog({ open, articleIds, onClose }: ClaudeShareDial
                   icon={<Icon name="doc" size={13} />}
                 >
                   复制提示词
+                </Button>
+                <Button
+                  onClick={() =>
+                    copyText(writebackUrl)
+                      .then(() => toast.success('回写 API 已复制'))
+                      .catch(() => toast.error('复制失败'))
+                  }
+                  icon={<Icon name="external" size={13} />}
+                >
+                  复制回写 API
                 </Button>
                 <a className={s.download} href={downloadUrl} target="_blank" rel="noreferrer">
                   <Icon name="download" size={13} />

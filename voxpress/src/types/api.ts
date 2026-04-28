@@ -7,6 +7,17 @@ export interface Page<T> {
   total?: number;
 }
 
+export interface Health {
+  ok: boolean;
+  version: string;
+  ollama: boolean;
+  whisper: boolean;
+  db: boolean;
+  deploy_commit: string | null;
+  deploy_branch: string | null;
+  deployed_at: ISO8601 | null;
+}
+
 export interface Creator {
   id: number;
   platform: Platform;
@@ -90,6 +101,7 @@ export interface ArticleClaudeShare {
   file_name: string;
   article_count: number;
   download_url: string;
+  writeback_url: string;
   local_file_path: string;
   created_at: ISO8601;
   articles: ArticleShareItem[];
@@ -154,7 +166,7 @@ export interface ArticleDetail extends Article {
 
 export type TaskStage = 'download' | 'transcribe' | 'correct' | 'organize' | 'save';
 export type TaskStatus = 'queued' | 'running' | 'done' | 'failed' | 'canceled';
-export type TaskTriggerKind = 'manual' | 'batch' | 'rerun';
+export type TaskTriggerKind = 'manual' | 'batch' | 'rerun' | 'auto';
 export type SystemJobStatus = 'running' | 'done' | 'failed' | 'skipped';
 
 export interface Task {

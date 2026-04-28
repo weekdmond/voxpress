@@ -133,6 +133,29 @@
   font-style: normal;
 }
 
+.metaBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--vp-line);
+  border-radius: 10px;
+  background: var(--vp-bg-2);
+}
+
+.metaBlock span {
+  font-size: 11px;
+  color: var(--vp-ink-3);
+  font-family: var(--vp-font-mono);
+}
+
+.metaBlock code {
+  font-family: var(--vp-font-mono);
+  font-size: 12px;
+  color: var(--vp-ink);
+  word-break: break-all;
+}
+
 .terminal {
   overflow: hidden;
   border-radius: 10px;

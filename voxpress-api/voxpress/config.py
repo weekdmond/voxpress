@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     creator_refresh_interval_hours: int = Field(default=4, ge=1, le=168)
     creator_refresh_recent_count: int = Field(default=5, ge=1, le=20)
     creator_import_max_videos: int = Field(default=20, ge=1, le=1000)
+    creator_auto_task_enabled: bool = True
+    creator_auto_task_recent_count: int = Field(default=1, ge=1, le=20)
     oss_region: str | None = None
     oss_endpoint: str | None = None
     oss_bucket: str | None = None

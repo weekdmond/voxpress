@@ -17,6 +17,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Literal
+from urllib.parse import urlparse
 
 import httpx
 
@@ -28,6 +29,15 @@ _USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_0) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
+
+_DOUYIN_HOSTS = {
+    "v.douyin.com",
+    "douyin.com",
+    "www.douyin.com",
+    "iesdouyin.com",
+    "www.iesdouyin.com",
+}
+_TRAILING_URL_PUNCT = "。；，、！？）》】」』'\""
 
 
 @dataclass
@@ -42,8 +52,33 @@ class UnknownDouyinLink(RuntimeError):
     pass
 
 
+def extract_douyin_url(text: str) -> str | None:
+    """Extract the first Douyin URL from a pasted share snippet.
+
+    Users often paste the whole Douyin share text, for example:
+    `长按复制此条消息，打开抖音搜索，查看TA的更多作品。 https://v.douyin.com/xxxx/`
+    """
+    raw = text.strip()
+    if not raw:
+        return None
+    for candidate in re.findall(r"https?://[^\s]+", raw):
+        cleaned = candidate.rstrip(_TRAILING_URL_PUNCT)
+        host = (urlparse(cleaned).netloc or "").lower()
+        if host in _DOUYIN_HOSTS:
+            return cleaned
+    return None
+
+
+def normalize_douyin_input(text: str) -> str:
+    raw = text.strip()
+    if not raw:
+        return raw
+    return extract_douyin_url(raw) or raw
+
+
 async def resolve(url: str, *, timeout: float = 10.0) -> ResolvedUrl:
     """Follow redirects if needed, then classify."""
+    url = normalize_douyin_input(url)
     final = await _unshorten(url, timeout=timeout) if _is_short_link(url) else url
     return _classify(final)
 

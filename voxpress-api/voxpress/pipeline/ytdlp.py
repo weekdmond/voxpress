@@ -92,11 +92,11 @@ def _scrape_creator_sync(url: str, cookie_text: str | None, max_videos: int) -> 
                 low = msg.lower()
                 if "fresh cookies" in low or "login required" in low:
                     raise RuntimeError(
-                        "抖音要求登录 Cookie 才能查看博主主页,请在 /settings 导入 Cookie。"
+                        "抖音要求登录 Cookie 才能查看创作者主页,请在 /settings 导入 Cookie。"
                     ) from e
                 if "unsupported url" in low:
-                    raise RuntimeError(f"yt-dlp 不识别这个博主主页:{msg[:200]}") from e
-                raise RuntimeError(f"抓取博主主页失败:{msg[:200]}") from e
+                    raise RuntimeError(f"yt-dlp 不识别这个创作者主页:{msg[:200]}") from e
+                raise RuntimeError(f"抓取创作者主页失败:{msg[:200]}") from e
     finally:
         if cookie_path and cookie_path.exists():
             try:
@@ -143,7 +143,7 @@ def _scrape_creator_sync(url: str, cookie_text: str | None, max_videos: int) -> 
 
     creator = {
         "external_id": str(uploader_id) or info.get("id") or url,
-        "name": uploader or "未知博主",
+        "name": uploader or "未知创作者",
         "handle": _derive_handle(uploader_id, uploader),
         "region": None,
         "verified": bool(info.get("channel_is_verified") or info.get("uploader_verified") or False),
@@ -326,7 +326,7 @@ def _translate_video_extract_error(exc: Exception, *, action: str) -> RuntimeErr
     low = msg.lower()
     if "/share/user/" in msg or "/user/" in msg and "unsupported url" in low:
         return RuntimeError(
-            "这是博主主页链接,不是视频。请改用「博主库 → 导入博主」,"
+            "这是创作者主页链接,不是视频。请改用「来源库 → 导入来源」,"
             "或把短链换成某一条具体视频的链接(douyin.com/video/...)。"
         )
     if "unsupported url" in low:

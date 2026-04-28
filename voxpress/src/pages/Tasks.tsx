@@ -427,7 +427,7 @@ export function TasksPage() {
   const runSystemJob = useMutation({
     mutationFn: () => api.post<SystemJobRun>('/api/system-jobs/creator_refresh/run'),
     onSuccess: () => {
-      toast.success('已开始手动执行博主刷新');
+      toast.success('已开始手动执行来源刷新');
       qc.invalidateQueries({ queryKey: ['system-jobs'] });
     },
     onError: (e: Error) => toast.error(e.message || '手动执行失败'),
@@ -558,7 +558,7 @@ export function TasksPage() {
           <span className={s.statDelta}>{isSystem ? '按周期统计' : '今日端到端'}</span>
         </div>
         <div className={s.stat}>
-          <span className={s.statKey}>{isSystem ? '已刷新博主' : '今日消费'}</span>
+          <span className={s.statKey}>{isSystem ? '已刷新来源' : '今日消费'}</span>
           <b className={s.statValue}>
             {isSystem
               ? systemSummary?.today_processed_items ?? '—'
@@ -569,7 +569,7 @@ export function TasksPage() {
           <span className={s.statDelta}>{isSystem ? '今日累计更新' : 'DashScope 计费'}</span>
         </div>
         <div className={s.stat}>
-          <span className={s.statKey}>{isSystem ? '失败博主' : 'Token 消耗'}</span>
+          <span className={s.statKey}>{isSystem ? '失败来源' : 'Token 消耗'}</span>
           <b className={s.statValue}>
             {isSystem
               ? systemSummary?.today_failed_items ?? '—'
@@ -731,7 +731,7 @@ export function TasksPage() {
                 </span>
                 <span />
                 <span>任务 ID</span>
-                <span>文章 / 博主</span>
+                <span>文章 / 创作者</span>
                 <span>任务链</span>
                 <span>成本 · Token · 耗时</span>
                 <span>执行时间</span>

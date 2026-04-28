@@ -30,7 +30,7 @@ export function TaskCard({ task, onCancel, onRetry }: TaskCardProps) {
             {task.title_guess || '解析中…'}
           </p>
           <div className={s.meta}>
-            <span>{task.creator_name ?? '未识别博主'}</span>
+            <span>{task.creator_name ?? '未识别创作者'}</span>
             <span className={s.dot}>·</span>
             <span>{task.detail ?? '等待调度'}</span>
           </div>

@@ -19,12 +19,12 @@ _background_runs: set[asyncio.Task[None]] = set()
 
 def _job_scope() -> tuple[int, str]:
     recent_count = settings.creator_refresh_recent_count
-    return recent_count, f"抖音博主库 · 最近 {recent_count} 条作品"
+    return recent_count, f"抖音来源库 · 最近 {recent_count} 条作品"
 
 
 def _job_detail(trigger_kind: str) -> str:
     if trigger_kind == "manual":
-        return "手动执行博主刷新"
+        return "手动执行来源刷新"
     return f"每 {settings.creator_refresh_interval_hours} 小时刷新一次"
 
 
@@ -37,9 +37,10 @@ async def _execute_run(run_id: UUID, *, recent_count: int) -> None:
         elif summary.failed > 0:
             status = "failed"
         detail = (
-            f"刷新 {summary.refreshed}/{summary.total} 位博主"
+            f"刷新 {summary.refreshed}/{summary.total} 个来源"
             f" · 失败 {summary.failed}"
             f" · 跳过 {summary.skipped}"
+            f" · 自动转译 {summary.auto_tasks}"
         )
         await finish_system_job_run(
             run_id,
@@ -51,10 +52,11 @@ async def _execute_run(run_id: UUID, *, recent_count: int) -> None:
             skipped_items=summary.skipped,
         )
         logger.info(
-            "creator refresh cycle finished: refreshed=%s failed=%s skipped=%s total=%s",
+            "creator refresh cycle finished: refreshed=%s failed=%s skipped=%s auto_tasks=%s total=%s",
             summary.refreshed,
             summary.failed,
             summary.skipped,
+            summary.auto_tasks,
             summary.total,
         )
     except asyncio.CancelledError:
@@ -78,7 +80,7 @@ async def start_creator_refresh_run(*, trigger_kind: str = "scheduled", backgrou
     recent_count, job_scope = _job_scope()
     run_id = await start_system_job_run(
         job_key="creator_refresh",
-        job_name="博主定时刷新",
+        job_name="来源定时刷新",
         trigger_kind=trigger_kind,
         scope=job_scope,
         detail=_job_detail(trigger_kind),

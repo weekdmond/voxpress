@@ -3,13 +3,18 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Sequence
+from uuid import UUID
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from voxpress.auto_tasks import create_auto_tasks_for_videos
+from voxpress.config import settings
 from voxpress.db import session_scope
-from voxpress.models import Article, Creator, SettingEntry, Video
+from voxpress.models import Article, Creator, SettingEntry, Task, Video
 from voxpress.pipeline.douyin_scraper import ScrapeError, ScrapedCreator, ScrapedUserPage, ScrapedVideo, scrape_user_page
+from voxpress.task_store import emit_task_create
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +25,7 @@ class CreatorRefreshSummary:
     refreshed: int
     failed: int
     skipped: int = 0
+    auto_tasks: int = 0
 
 
 async def load_cookie_text(s: AsyncSession) -> str | None:
@@ -41,12 +47,15 @@ async def upsert_scraped_page(
     page: ScrapedUserPage,
     *,
     prune_missing: bool,
+    new_videos_out: list[Video] | None = None,
 ) -> Creator:
     creator = await _upsert_creator(s, page.creator)
     await s.flush()
     scraped_ids: list[str] = []
     for v in page.videos:
-        await _upsert_video(s, creator.id, v)
+        new_video = await _upsert_video(s, creator.id, v)
+        if new_video is not None and new_videos_out is not None:
+            new_videos_out.append(new_video)
         scraped_ids.append(v.id)
     if prune_missing and page.complete:
         await _prune_stale_videos(s, creator.id, scraped_ids)
@@ -74,6 +83,7 @@ async def refresh_all_creators(*, max_videos: int) -> CreatorRefreshSummary:
 
     refreshed = 0
     failed = 0
+    auto_tasks = 0
 
     for creator_id, sec_uid in rows:
         try:
@@ -97,11 +107,37 @@ async def refresh_all_creators(*, max_videos: int) -> CreatorRefreshSummary:
             )
             continue
 
-        async with session_scope() as s:
-            await upsert_scraped_page(s, page, prune_missing=False)
+        task_ids = await _upsert_page_and_create_auto_tasks(page)
+        auto_tasks += len(task_ids)
+        for task_id in task_ids:
+            await emit_task_create(task_id)
         refreshed += 1
 
-    return CreatorRefreshSummary(total=total, refreshed=refreshed, failed=failed, skipped=0)
+    return CreatorRefreshSummary(
+        total=total,
+        refreshed=refreshed,
+        failed=failed,
+        skipped=0,
+        auto_tasks=auto_tasks,
+    )
+
+
+async def _upsert_page_and_create_auto_tasks(page: ScrapedUserPage) -> list[UUID]:
+    new_videos: list[Video] = []
+    async with session_scope() as s:
+        await upsert_scraped_page(s, page, prune_missing=False, new_videos_out=new_videos)
+        tasks = await _create_auto_tasks_for_new_videos(s, new_videos)
+        return [task.id for task in tasks]
+
+
+async def _create_auto_tasks_for_new_videos(s: AsyncSession, new_videos: Sequence[Video]) -> list[Task]:
+    if not settings.creator_auto_task_enabled:
+        return []
+    return await create_auto_tasks_for_videos(
+        s,
+        new_videos,
+        limit=settings.creator_auto_task_recent_count,
+    )
 
 
 def _looks_like_cookie_issue(message: str) -> bool:
@@ -144,7 +180,7 @@ async def _upsert_creator(s: AsyncSession, c: ScrapedCreator) -> Creator:
     return row
 
 
-async def _upsert_video(s: AsyncSession, creator_id: int, v: ScrapedVideo) -> None:
+async def _upsert_video(s: AsyncSession, creator_id: int, v: ScrapedVideo) -> Video | None:
     now = datetime.now(tz=timezone.utc)
     published = (
         datetime.fromtimestamp(v.published_at_ts, tz=timezone.utc)
@@ -164,24 +200,24 @@ async def _upsert_video(s: AsyncSession, creator_id: int, v: ScrapedVideo) -> No
         existing.source_url = v.source_url
         existing.published_at = published
         existing.updated_at = now
-        return
-    s.add(
-        Video(
-            id=v.id,
-            creator_id=creator_id,
-            title=v.title,
-            duration_sec=v.duration_sec,
-            likes=v.likes,
-            plays=v.plays,
-            comments=v.comments,
-            shares=v.shares,
-            collects=v.collects,
-            published_at=published,
-            cover_url=v.cover_url,
-            source_url=v.source_url,
-            updated_at=now,
-        )
+        return None
+    row = Video(
+        id=v.id,
+        creator_id=creator_id,
+        title=v.title,
+        duration_sec=v.duration_sec,
+        likes=v.likes,
+        plays=v.plays,
+        comments=v.comments,
+        shares=v.shares,
+        collects=v.collects,
+        published_at=published,
+        cover_url=v.cover_url,
+        source_url=v.source_url,
+        updated_at=now,
     )
+    s.add(row)
+    return row
 
 
 async def _prune_stale_videos(s: AsyncSession, creator_id: int, scraped_ids: list[str]) -> None:

@@ -38,7 +38,16 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
 
   // Health
   if (method === 'GET' && path === '/api/health') {
-    return delay({ ok: true, version: '0.4.0', ollama: true, whisper: true, db: true });
+    return delay({
+      ok: true,
+      version: '0.4.0',
+      ollama: true,
+      whisper: true,
+      db: true,
+      deploy_commit: 'mock123',
+      deploy_branch: 'main',
+      deployed_at: new Date().toISOString(),
+    });
   }
 
   // Creators
@@ -64,7 +73,7 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
     const m = path.match(/^\/api\/creators\/(\d+)$/)!;
     const id = Number(m[1]);
     const c = creators.find((c) => c.id === id);
-    if (!c) throw apiError('creator_not_found', '博主不存在', 404);
+    if (!c) throw apiError('creator_not_found', '创作者不存在', 404);
     return delay(c);
   }
 
@@ -121,10 +130,11 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
     const shareId = Math.random().toString(36).slice(2, 10);
     return delay({
       share_id: shareId,
-      file_name: `voxpress-claude-demo-${shareId}.md`,
+      file_name: `speechfolio-source-pack-demo-${shareId}.md`,
       article_count: matched.length,
-      download_url: `/api/articles/share/voxpress-claude-demo-${shareId}.md`,
-      local_file_path: `/tmp/voxpress/shares/voxpress-claude-demo-${shareId}.md`,
+      download_url: `/api/articles/share/s/${shareId}`,
+      writeback_url: `/api/articles/share/s/${shareId}/writeback`,
+      local_file_path: `/tmp/voxpress/shares/${shareId}.md`,
       created_at: new Date().toISOString(),
       articles: matched.map((article) => ({
         id: article.id,
@@ -316,7 +326,7 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
   }
 
   if (method === 'GET' && path === '/api/tasks/export') {
-    return delay('任务 ID,状态,阶段,文章标题,博主,触发方式,开始,结束,耗时(ms),tokens,成本(¥),错误信息\n');
+    return delay('任务 ID,状态,阶段,文章标题,创作者,触发方式,开始,结束,耗时(ms),tokens,成本(¥),错误信息\n');
   }
 
   if (method === 'POST' && path === '/api/system-jobs/creator_backfill/run') {
@@ -326,11 +336,11 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
     return delay({
       id: `sj_${Math.random().toString(36).slice(2, 8)}`,
       job_key: 'creator_backfill',
-      job_name: '博主作品补齐',
+      job_name: '来源作品补齐',
       trigger_kind: 'manual',
       status: 'running',
       scope: `${creator.name} · 全量作品`,
-      detail: '手动补齐博主作品',
+      detail: '手动补齐来源作品',
       error: null,
       total_items: creator.video_count,
       processed_items: 0,
@@ -373,7 +383,7 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
         last_tested_at: new Date().toISOString(),
       },
     });
-    return delay({ status: 'ok', detail: '博主页抓取和视频读取都通过' });
+    return delay({ status: 'ok', detail: '创作者主页抓取和视频读取都通过' });
   }
 
   if (method === 'GET' && path === '/api/models') {

@@ -102,7 +102,7 @@ async def _resolve_video_identity(url: str) -> tuple[str, str]:
         video_id = matched.group(1)
         return video_id, f"https://www.douyin.com/video/{video_id}"
     raise RuntimeError(
-        "这是博主主页链接,不是视频。请改用「博主库 → 导入博主」,"
+        "这是创作者主页链接,不是视频。请改用「来源库 → 导入来源」,"
         "或把短链换成某一条具体视频的链接(douyin.com/video/...)。"
     )
 

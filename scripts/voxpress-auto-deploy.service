@@ -1,0 +1,11 @@
+[Unit]
+Description=VoxPress auto deploy when git main updates
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/home/work/app
+ExecStart=/usr/bin/env bash /home/work/app/scripts/voxpress-auto-deploy.sh
+

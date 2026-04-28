@@ -23,7 +23,7 @@ class StubExtractor(Extractor):
             video_id=f"stub_{seed}",
             creator_external_id=f"sec_uid_{seed}",
             creator_handle=f"@stub-{seed % 100}",
-            creator_name=f"演示博主 {seed % 100}",
+            creator_name=f"演示创作者 {seed % 100}",
             creator_region="北京",
             creator_verified=seed % 2 == 0,
             creator_followers=100_000 + seed * 37,

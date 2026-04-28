@@ -53,7 +53,7 @@ def _scope(target: CreatorBackfillTarget) -> str:
 
 
 def _detail(trigger_kind: str, target: CreatorBackfillTarget) -> str:
-    prefix = "首次导入后自动补齐" if trigger_kind == "auto" else "手动补齐博主作品"
+    prefix = "首次导入后自动补齐" if trigger_kind == "auto" else "手动补齐来源作品"
     return f"{prefix} · 主页标注 {target.listed_video_count} 条"
 
 
@@ -63,7 +63,7 @@ async def _execute_run(run_id: UUID, target: CreatorBackfillTarget) -> None:
             await finish_system_job_run(
                 run_id,
                 status="skipped",
-                detail="未导入抖音 Cookie，无法补齐博主作品",
+                detail="未导入抖音 Cookie，无法补齐来源作品",
                 total_items=target.listed_video_count,
                 skipped_items=target.listed_video_count,
             )
@@ -135,7 +135,7 @@ async def start_creator_backfill_run(
     target = await _load_target(creator_id)
     run_id = await start_system_job_run(
         job_key="creator_backfill",
-        job_name="博主作品补齐",
+        job_name="来源作品补齐",
         trigger_kind=trigger_kind,
         scope=_scope(target),
         detail=_detail(trigger_kind, target),

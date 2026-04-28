@@ -339,13 +339,13 @@ export function ImportPage() {
   return (
     <Page>
       <div className={s.crumb}>
-        <Link to="/library">← 博主库</Link>
+        <Link to="/library">← 来源库</Link>
         <span className={s.crumbSep}>/</span>
         <span>{creator?.name ?? '—'}</span>
       </div>
 
       <PageHead
-        title="创作者视频库"
+        title="来源视频库"
         meta={
           <>
             <span>{totalVideos.toLocaleString()} 条视频</span>
@@ -381,7 +381,7 @@ export function ImportPage() {
                   href={`https://www.douyin.com/user/${creator.external_id}`}
                   target="_blank"
                   rel="noreferrer noopener"
-                  title="在抖音打开主页"
+                  title="在抖音打开创作者主页"
                 >
                   <Icon name="external" size={11} />
                   在抖音查看
@@ -391,7 +391,7 @@ export function ImportPage() {
                 className={s.chipButton}
                 disabled={backfillMut.isPending}
                 onClick={() => backfillMut.mutate()}
-                title="后台抓取这个博主尚未入库的作品"
+                title="后台补齐这个来源尚未入库的作品"
               >
                 <Icon name="refresh" size={11} />
                 {backfillMut.isPending

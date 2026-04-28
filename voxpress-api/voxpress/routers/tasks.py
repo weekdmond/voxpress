@@ -37,6 +37,7 @@ from voxpress.task_store import (
     cancel_task as cancel_task_record,
     emit_task_create,
 )
+from voxpress.url_resolve import normalize_douyin_input
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -50,7 +51,7 @@ RERUN_STAGE_PROGRESS = {
 
 
 def _url_kind(url: str) -> str | None:
-    url = url.strip()
+    url = normalize_douyin_input(url)
     if not url:
         return None
     if "v.douyin.com" in url:
@@ -488,12 +489,13 @@ async def tasks_summary(
 async def create_task(
     payload: TaskCreateIn, s: AsyncSession = Depends(get_session)
 ) -> TaskOut:
-    kind = _url_kind(payload.url)
+    url = normalize_douyin_input(payload.url)
+    kind = _url_kind(url)
     if kind is None:
         raise InvalidUrl("链接无法识别或非抖音域名")
     if kind == "user":
-        raise InvalidUrl("博主主页请用 /creators/resolve 然后 /tasks/batch")
-    task = await _create_task(s, source_url=payload.url, trigger_kind="manual")
+        raise InvalidUrl("创作者主页请先用 /creators/resolve，再用 /tasks/batch 创建任务")
+    task = await _create_task(s, source_url=url, trigger_kind="manual")
     await s.commit()
     await s.refresh(task)
     await emit_task_create(task.id)
@@ -628,7 +630,7 @@ async def export_tasks(
     payloads = await build_task_payloads(task_ids)
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["任务 ID", "状态", "阶段", "文章标题", "博主", "触发方式", "开始", "结束", "耗时(ms)", "tokens", "成本(¥)", "错误信息"])
+    writer.writerow(["任务 ID", "状态", "阶段", "文章标题", "创作者", "触发方式", "开始", "结束", "耗时(ms)", "tokens", "成本(¥)", "错误信息"])
     for item in payloads:
         writer.writerow(
             [

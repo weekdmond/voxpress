@@ -31,7 +31,7 @@ async def lifespan(_: FastAPI):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="VoxPress API", version=__version__, lifespan=lifespan)
+    app = FastAPI(title="SpeechFolio API", version=__version__, lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,

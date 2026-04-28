@@ -227,9 +227,30 @@ class ArticleClaudeShareOut(BaseModel):
     file_name: str
     article_count: int
     download_url: str
+    writeback_url: str
     local_file_path: str
     created_at: datetime
     articles: list[ArticleShareItemOut]
+    missing_ids: list[UUID] = Field(default_factory=list)
+
+
+class ArticleClaudeWritebackItemIn(BaseModel):
+    id: UUID
+    content_md: str = Field(min_length=1)
+    title: str | None = None
+    summary: str | None = None
+    tags: list[str] | None = None
+
+
+class ArticleClaudeWritebackIn(BaseModel):
+    articles: list[ArticleClaudeWritebackItemIn] = Field(min_length=1, max_length=200)
+
+
+class ArticleClaudeWritebackOut(BaseModel):
+    share_id: str
+    requested: int
+    updated: int
+    updated_ids: list[UUID] = Field(default_factory=list)
     missing_ids: list[UUID] = Field(default_factory=list)
 
 
@@ -237,7 +258,7 @@ class ArticleClaudeShareOut(BaseModel):
 
 TaskStage = Literal["download", "transcribe", "correct", "organize", "save"]
 TaskStatus = Literal["queued", "running", "done", "failed", "canceled"]
-TaskTriggerKind = Literal["manual", "batch", "rerun"]
+TaskTriggerKind = Literal["manual", "batch", "rerun", "auto"]
 SystemJobStatus = Literal["running", "done", "failed", "skipped"]
 
 
@@ -474,3 +495,6 @@ class HealthOut(BaseModel):
     ollama: bool
     whisper: bool
     db: bool
+    deploy_commit: str | None = None
+    deploy_branch: str | None = None
+    deployed_at: datetime | None = None

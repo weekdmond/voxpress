@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Icon } from '@/components/primitives';
 import { api } from '@/lib/api';
 import { formatDuration, formatRelative } from '@/lib/format';
-import type { TaskDetail, TaskStage, TaskStageRun } from '@/types/api';
+import type { TaskDetail, TaskStage, TaskStageRun, TaskTriggerKind } from '@/types/api';
 import s from './TaskDrawer.module.css';
 
 const STAGE_LABEL: Record<TaskStage, string> = {
@@ -32,6 +32,13 @@ function formatDurationMs(ms: number | null): string {
   if (!ms || ms < 0) return '—';
   const s = Math.round(ms / 1000);
   return formatDuration(s);
+}
+
+function triggerLabel(kind: TaskTriggerKind): string {
+  if (kind === 'manual') return '手动创建';
+  if (kind === 'batch') return '批量创建';
+  if (kind === 'rerun') return '重跑';
+  return '自动转译';
 }
 
 function stepStateClass(r: TaskStageRun): string {
@@ -253,7 +260,7 @@ export function TaskDrawer({ taskId, onClose, onRerun, onCancel }: TaskDrawerPro
                 </div>
                 <div className={s.metaRow}>
                   <span>触发</span>
-                  <span>{t.trigger_kind}</span>
+                  <span>{triggerLabel(t.trigger_kind)}</span>
                 </div>
                 <div className={s.metaRow}>
                   <span>时长</span>

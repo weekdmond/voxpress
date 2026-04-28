@@ -68,7 +68,7 @@ export function SettingsPage() {
     if (!settings) return;
     const payload = {
       exported_at: new Date().toISOString(),
-      source: 'voxpress-settings',
+      source: 'speechfolio-settings',
       settings,
       available_models: models ?? null,
     };
@@ -79,7 +79,7 @@ export function SettingsPage() {
     const link = document.createElement('a');
     const stamp = new Date().toISOString().replace(/[:]/g, '-').replace(/\.\d+Z$/, 'Z');
     link.href = url;
-    link.download = `voxpress-settings-${stamp}.json`;
+    link.download = `speechfolio-settings-${stamp}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -130,7 +130,7 @@ export function SettingsPage() {
         title="设置"
         meta={
           <>
-            <span>VoxPress v0.4</span>
+            <span>SpeechFolio v0.4</span>
             <span>· DashScope 云端模式</span>
           </>
         }
@@ -321,7 +321,7 @@ export function SettingsPage() {
             <option value="auto">自动识别</option>
           </Select>
         </Field>
-        <Field label="启用 initial_prompt" help="把视频标题和博主名注入 ASR corpus，提升专名和主题词命中率">
+        <Field label="启用 initial_prompt" help="把视频标题和创作者名注入 ASR corpus，提升专名和主题词命中率">
           <label style={checkboxStyle}>
             <input
               type="checkbox"
@@ -482,7 +482,7 @@ export function SettingsPage() {
           <div>
             <strong style={{ fontSize: 14 }}>抖音 Cookie</strong>
             <div style={{ color: 'var(--vp-ink-3)', fontSize: 11.5 }}>
-              访问博主主页 / 下载视频需要
+              访问创作者主页 / 下载视频需要
             </div>
           </div>
           {cookieChip}

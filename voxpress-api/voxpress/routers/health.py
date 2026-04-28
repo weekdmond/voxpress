@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from voxpress import __version__
 from voxpress.db import get_session
+from voxpress.deploy_info import load_deploy_info
 from voxpress.runtime_settings import load_dashscope_runtime_settings
 from voxpress.schemas import HealthOut
 
@@ -22,4 +23,14 @@ async def health(s: AsyncSession = Depends(get_session)) -> HealthOut:
     dashscope_ok = False
     if db_ok:
         dashscope_ok = (await load_dashscope_runtime_settings(session=s)).enabled
-    return HealthOut(ok=db_ok and dashscope_ok, version=__version__, ollama=dashscope_ok, whisper=dashscope_ok, db=db_ok)
+    deploy = load_deploy_info()
+    return HealthOut(
+        ok=db_ok and dashscope_ok,
+        version=__version__,
+        ollama=dashscope_ok,
+        whisper=dashscope_ok,
+        db=db_ok,
+        deploy_commit=deploy.commit,
+        deploy_branch=deploy.branch,
+        deployed_at=deploy.deployed_at,
+    )

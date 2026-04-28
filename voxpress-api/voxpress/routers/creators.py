@@ -8,6 +8,7 @@ from voxpress.db import get_session
 from voxpress.errors import CreatorNotFound
 from voxpress.models import Article, Creator
 from voxpress.schemas import CreatorOut, Page, ResolveCreatorIn
+from voxpress.url_resolve import normalize_douyin_input
 
 router = APIRouter(prefix="/api/creators", tags=["creators"])
 
@@ -72,7 +73,7 @@ async def resolve_creator(
     payload: ResolveCreatorIn, s: AsyncSession = Depends(get_session)
 ) -> CreatorOut:
     """MVP: if any creator matches handle fragment in URL, return it; else pick first creator as stub."""
-    url = payload.url.strip()
+    url = normalize_douyin_input(payload.url)
     matched_id: int | None = None
     if "/user/" in url:
         suffix = url.rsplit("/user/", 1)[-1].split("?")[0][:32]
@@ -83,5 +84,5 @@ async def resolve_creator(
     if matched_id is None:
         matched_id = await s.scalar(select(Creator.id).order_by(Creator.id.asc()).limit(1))
     if matched_id is None:
-        raise CreatorNotFound("尚无任何博主,请先导入")
+        raise CreatorNotFound("尚无任何来源,请先导入")
     return await get_creator(matched_id, s)

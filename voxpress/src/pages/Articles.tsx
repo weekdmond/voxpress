@@ -478,7 +478,7 @@ export function ArticlesPage() {
               <button className={allCbxCls} onClick={selection.toggleAllOnPage} aria-label="全选" />
             </span>
             <span>文章</span>
-            <span>博主</span>
+            <span>创作者</span>
             <span>标签</span>
             <span>指标</span>
             <span>时间</span>

@@ -6,8 +6,8 @@ import { Page, PageHead } from '@/layouts/AppShell';
 import { Avatar, Button, Chip, Icon, Input } from '@/components/primitives';
 import { ArtCard } from '@/components/ArtCard/ArtCard';
 import { api } from '@/lib/api';
-import { formatEta, formatRelative } from '@/lib/format';
-import type { Article, Creator, Page as ApiPage, Task } from '@/types/api';
+import { formatDateTime, formatEta, formatRelative } from '@/lib/format';
+import type { Article, Creator, Health, Page as ApiPage, Task } from '@/types/api';
 import { useRunningTasks } from '@/features/tasks/useRunningTasks';
 import s from './Home.module.css';
 
@@ -69,6 +69,11 @@ export function HomePage() {
     queryFn: () => api.get<ApiPage<Creator>>('/api/creators'),
     staleTime: 60_000,
   });
+  const { data: health } = useQuery({
+    queryKey: ['health'],
+    queryFn: () => api.get<Health>('/api/health'),
+    staleTime: 60_000,
+  });
   const creatorMap = useMemo(() => {
     const map = new Map<number, Creator>();
     creatorsPage?.items.forEach((c) => map.set(c.id, c));
@@ -85,10 +90,10 @@ export function HomePage() {
         const fetched = res.fetched_video_count ?? res.video_count ?? 0;
         const total = res.video_count ?? fetched;
         const summary =
-          total !== fetched ? `已入库 ${fetched} 条；主页标注 ${total} 条` : `已入库 ${fetched} 条`;
+          total !== fetched ? `已入库 ${fetched} 条；主页显示 ${total} 条` : `已入库 ${fetched} 条`;
         const backfill = res.backfill_started ? '；后台补齐已启动' : '';
         toast.success(
-          `已抓取博主「${res.name ?? '未命名'}」的视频列表：${summary}${backfill}`,
+          `已同步创作者「${res.name ?? '未命名'}」的公开视频列表：${summary}${backfill}`,
           { duration: 6000 },
         );
         qc.invalidateQueries({ queryKey: ['creators'] });
@@ -135,6 +140,8 @@ export function HomePage() {
             <span>提交新任务</span>
             <span>· 运行中</span>
             <span>· 最近完成</span>
+            {health?.deploy_commit ? <span>· 版本 {health.deploy_commit.slice(0, 7)}</span> : null}
+            {health?.deployed_at ? <span>· 更新 {formatDateTime(health.deployed_at)}</span> : null}
           </>
         }
       />
@@ -143,7 +150,7 @@ export function HomePage() {
         <Input
           size="lg"
           mono
-          placeholder="粘贴抖音视频或博主主页链接 · 回车提交"
+          placeholder="导入你的公开视频链接、创作者主页链接或整段分享文案 · 回车提交"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => {
@@ -160,10 +167,10 @@ export function HomePage() {
           className={[s.hint, url.trim() && !looksValid ? s.errorHint : ''].join(' ')}
         >
           {url.trim() && !looksValid
-            ? '请贴一条抖音链接(v.douyin.com / douyin.com/video/... / douyin.com/user/...)'
+            ? '当前支持抖音公开视频或创作者主页链接(v.douyin.com / douyin.com/video/... / douyin.com/user/...)'
             : resolveLink.isPending
             ? '解析中…'
-            : '视频链接 → 直接入队;博主主页/短链 → 自动抓视频列表后跳导入页'}
+            : '支持直接粘贴整段抖音分享文案；公开视频链接 → 直接入队；创作者主页短链 → 同步公开内容后进入来源页'}
         </div>
       </section>
 
@@ -207,7 +214,7 @@ export function HomePage() {
                       {t.title_guess || '解析中…'}
                     </div>
                     <div className={s.taskMetaLine}>
-                      <span>{t.creator_name ?? '未识别博主'}</span>
+                      <span>{t.creator_name ?? '未识别创作者'}</span>
                       <span className={s.taskDot}>·</span>
                       <span>{t.detail ?? (t.status === 'queued' ? '等待调度' : '处理中')}</span>
                       <span className={s.taskDot}>·</span>
@@ -284,7 +291,7 @@ export function HomePage() {
                 <ArtCard
                   key={a.id}
                   article={a}
-                  creatorName={c?.name ?? '未知博主'}
+                  creatorName={c?.name ?? '未知创作者'}
                   creatorInitial={c?.initial ?? '?'}
                 />
               );

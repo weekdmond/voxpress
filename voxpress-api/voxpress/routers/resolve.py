@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from voxpress.auto_tasks import create_auto_tasks_for_videos
 from voxpress.config import settings
 from voxpress.creator_backfill import start_creator_backfill_run
 from voxpress.creator_sync import fetch_creator_page, load_cookie_text, upsert_scraped_page
@@ -27,7 +28,7 @@ from voxpress.pipeline.douyin_scraper import ScrapeError
 from voxpress.schemas import ResolveIn
 from voxpress.system_job_store import SystemJobAlreadyRunning
 from voxpress.task_store import emit_task_create
-from voxpress.url_resolve import UnknownDouyinLink, resolve
+from voxpress.url_resolve import UnknownDouyinLink, normalize_douyin_input, resolve
 
 
 class ScrapeFailed(ApiError):
@@ -43,7 +44,7 @@ logger = logging.getLogger(__name__)
 async def resolve_link(
     payload: ResolveIn, s: AsyncSession = Depends(get_session)
 ) -> dict:
-    url = payload.url.strip()
+    url = normalize_douyin_input(payload.url)
     if not url:
         raise InvalidUrl("链接不能为空")
     try:
@@ -78,13 +79,28 @@ async def resolve_link(
     initial_partial = listed_count > len(scraped.videos) or (
         listed_count <= 0 and hit_initial_cap
     )
-    creator = await upsert_scraped_page(s, scraped, prune_missing=not initial_partial)
+    new_videos: list[Video] = []
+    creator = await upsert_scraped_page(
+        s,
+        scraped,
+        prune_missing=not initial_partial,
+        new_videos_out=new_videos,
+    )
     await s.flush()
     stored_count = await s.scalar(
         select(func.count()).select_from(Video).where(Video.creator_id == creator.id)
     )
     needs_backfill = listed_count > int(stored_count or 0)
+    auto_tasks = []
+    if settings.creator_auto_task_enabled:
+        auto_tasks = await create_auto_tasks_for_videos(
+            s,
+            new_videos,
+            limit=settings.creator_auto_task_recent_count,
+        )
     await s.commit()
+    for task in auto_tasks:
+        await emit_task_create(task.id)
     if needs_backfill:
         try:
             run_id = await start_creator_backfill_run(

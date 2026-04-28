@@ -159,7 +159,7 @@ async def test_cookie(s: AsyncSession = Depends(get_session)) -> dict:
         if page.videos:
             sample_video_url = page.videos[0].source_url
         if not sample_video_url:
-            raise CookieInvalid("Cookie 已通过博主页抓取，但当前没有可用于验证的视频样本。")
+            raise CookieInvalid("Cookie 已通过创作者主页抓取，但当前没有可用于验证的视频样本。")
         video_probe = await probe_video_access(sample_video_url, cookie_text=cookie_text)
     except CookieInvalid:
         await _save_cookie_test_result(s, current, status="expired", checked_at=checked_at)
@@ -174,7 +174,7 @@ async def test_cookie(s: AsyncSession = Depends(get_session)) -> dict:
     await s.commit()
     return {
         "status": "ok",
-        "detail": "博主页抓取和视频下载探测都通过",
+        "detail": "创作者主页抓取和视频下载探测都通过",
         "creator_sample": page.creator.name,
         "video_sample": video_probe["title"],
     }

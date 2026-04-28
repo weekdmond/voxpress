@@ -29,10 +29,10 @@ export function LibraryPage() {
   return (
     <Page>
       <PageHead
-        title="博主库"
+        title="来源库"
         meta={
           <>
-            <span>{total} 位博主</span>
+            <span>{total} 个来源</span>
             <span>· 按粉丝排序</span>
           </>
         }
@@ -60,19 +60,19 @@ export function LibraryPage() {
         <div style={{ width: 280 }}>
           <Input
             leading={<Icon name="search" size={14} />}
-            placeholder="搜索博主名或简介"
+            placeholder="搜索来源名或简介"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
         </div>
         <Button variant="primary" icon={<Icon name="download" size={12} />}>
-          导入博主
+          导入来源
         </Button>
       </div>
 
       <ArtTable>
         <ArtHead>
-          <ArtHead.Cell flex={2}>博主</ArtHead.Cell>
+          <ArtHead.Cell flex={2}>来源</ArtHead.Cell>
           <ArtHead.Cell flex={1} align="right">
             粉丝 ↓
           </ArtHead.Cell>
@@ -125,7 +125,7 @@ export function LibraryPage() {
         ))}
         {creators.length === 0 ? (
           <div style={{ padding: '40px 18px', textAlign: 'center', color: 'var(--vp-ink-3)', fontSize: 12.5 }}>
-            暂无博主 · 换个关键字试试
+            暂无来源 · 换个关键词试试
           </div>
         ) : null}
       </ArtTable>

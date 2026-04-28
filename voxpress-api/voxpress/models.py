@@ -215,7 +215,7 @@ class Task(Base):
             "status IN ('queued','running','done','failed','canceled')", name="ck_tasks_status"
         ),
         CheckConstraint(
-            "trigger_kind IN ('manual','batch','rerun')",
+            "trigger_kind IN ('manual','batch','rerun','auto')",
             name="ck_tasks_trigger_kind",
         ),
         Index("idx_tasks_status", "status", "started_at"),

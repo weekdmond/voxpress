@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,8 @@ from voxpress.schemas import (
     ArticleBatchOut,
     ArticleDetailOut,
     ArticleClaudeShareOut,
+    ArticleClaudeWritebackIn,
+    ArticleClaudeWritebackOut,
     ArticleOut,
     ArticlePatch,
     ArticleRebuildIn,
@@ -75,12 +78,75 @@ def _share_dir() -> Path:
 
 def _cleanup_old_shares(path: Path) -> None:
     cutoff = datetime.now(tz=timezone.utc).timestamp() - 7 * 86_400
-    for item in path.glob("*.md"):
+    for item in path.iterdir():
+        if item.suffix not in {".md", ".json"}:
+            continue
         try:
             if item.stat().st_mtime < cutoff:
                 item.unlink()
         except OSError:
             continue
+
+
+def _share_md_path(share_id: str) -> Path:
+    return _share_dir() / f"{share_id}.md"
+
+
+def _share_meta_path(share_id: str) -> Path:
+    return _share_dir() / f"{share_id}.json"
+
+
+def _write_share_metadata(share_id: str, *, file_name: str, article_ids: list[UUID]) -> None:
+    _share_meta_path(share_id).write_text(
+        json.dumps(
+            {
+                "file_name": file_name,
+                "article_ids": [str(article_id) for article_id in article_ids],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _read_share_metadata(share_id: str) -> dict[str, Any] | None:
+    meta_path = _share_meta_path(share_id)
+    if not meta_path.exists() or not meta_path.is_file():
+        return None
+    try:
+        payload = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _read_share_file_name(share_id: str) -> str | None:
+    payload = _read_share_metadata(share_id)
+    if payload is None:
+        return None
+    file_name = payload.get("file_name")
+    return str(file_name) if isinstance(file_name, str) and file_name.endswith(".md") else None
+
+
+def _extract_title_from_markdown(content_md: str) -> str | None:
+    for raw_line in content_md.splitlines():
+        line = raw_line.strip()
+        if line.startswith("# "):
+            title = line[2:].strip()
+            return title or None
+    return None
+
+
+def _extract_summary_from_markdown(content_md: str) -> str | None:
+    quote_lines: list[str] = []
+    for raw_line in content_md.splitlines():
+        line = raw_line.strip()
+        if line.startswith(">"):
+            quote_lines.append(line.lstrip(">").strip())
+        elif quote_lines:
+            break
+    summary = " ".join(part for part in quote_lines if part).strip()
+    return summary[:120] if summary else None
 
 
 def _filename_slug(title: str) -> str:
@@ -114,12 +180,12 @@ def _build_claude_bundle(
     created_at: datetime,
 ) -> str:
     lines = [
-        "# VoxPress Claude 文章原稿包",
+        "# SpeechFolio Source Pack",
         "",
         f"- 导出时间: {created_at.isoformat()}",
         f"- 文章数量: {len(rows)}",
         "",
-        "这份文件由 VoxPress 生成，供 Claude 读取多篇文章的原稿、来源和整理参考。",
+        "这份文件由 SpeechFolio 生成，供 Claude 读取多篇文章的原稿、来源和整理参考。",
         "",
     ]
     for idx, (article, creator, video, transcript) in enumerate(rows, start=1):
@@ -143,7 +209,7 @@ def _build_claude_bundle(
         else:
             lines.extend(["### 逐字稿", "", "（当前文章暂无逐字稿，下面提供整理稿作为参考。）", ""])
         if content_md:
-            lines.extend(["### VoxPress 当前整理稿（参考）", "", content_md, ""])
+            lines.extend(["### SpeechFolio 当前整理稿（参考）", "", content_md, ""])
         lines.append("---")
         lines.append("")
     return "\n".join(lines).strip() + "\n"
@@ -173,29 +239,108 @@ async def create_claude_article_share(
         raise NotFound("selected articles not found")
 
     created_at = datetime.now(tz=timezone.utc)
-    share_id = uuid.uuid4().hex
+    share_id = uuid.uuid4().hex[:12]
     file_name = (
-        f"voxpress-claude-{created_at.strftime('%Y%m%d-%H%M%S')}-"
+        f"speechfolio-source-pack-{created_at.strftime('%Y%m%d-%H%M%S')}-"
         f"{_filename_slug(ordered_rows[0][0].title)}-{share_id[:8]}.md"
     )
-    share_path = _share_dir() / file_name
+    share_path = _share_md_path(share_id)
     _cleanup_old_shares(share_path.parent)
     share_path.write_text(
         _build_claude_bundle(ordered_rows, created_at=created_at),
         encoding="utf-8",
+    )
+    _write_share_metadata(
+        share_id,
+        file_name=file_name,
+        article_ids=[article.id for article, _, _, _ in ordered_rows],
     )
     missing_ids = [article_id for article_id in requested_ids if article_id not in row_map]
     return ArticleClaudeShareOut(
         share_id=share_id,
         file_name=file_name,
         article_count=len(ordered_rows),
-        download_url=f"/api/articles/share/{file_name}",
+        download_url=f"/api/articles/share/s/{share_id}",
+        writeback_url=f"/api/articles/share/s/{share_id}/writeback",
         local_file_path=str(share_path),
         created_at=created_at,
         articles=[
             ArticleShareItemOut(id=article.id, title=article.title, creator_name=creator.name)
             for article, creator, _, _ in ordered_rows
         ],
+        missing_ids=missing_ids,
+    )
+
+
+@router.get("/share/s/{share_id}")
+async def download_claude_article_share_short(share_id: str) -> FileResponse:
+    if not re.fullmatch(r"[0-9a-f]{12}", share_id):
+        raise NotFound("share file not found")
+    path = _share_md_path(share_id)
+    if not path.exists() or not path.is_file():
+        raise NotFound("share file not found")
+    file_name = _read_share_file_name(share_id) or f"{share_id}.md"
+    return FileResponse(
+        path,
+        media_type="text/markdown; charset=utf-8",
+        filename=file_name,
+    )
+
+
+@router.post("/share/s/{share_id}/writeback", response_model=ArticleClaudeWritebackOut)
+async def writeback_claude_article_share(
+    share_id: str,
+    payload: ArticleClaudeWritebackIn,
+    s: AsyncSession = Depends(get_session),
+) -> ArticleClaudeWritebackOut:
+    if not re.fullmatch(r"[0-9a-f]{12}", share_id):
+        raise NotFound("share file not found")
+    meta = _read_share_metadata(share_id)
+    if meta is None:
+        raise NotFound("share file not found")
+    allowed_ids = {
+        UUID(raw_id)
+        for raw_id in (meta.get("article_ids") or [])
+        if isinstance(raw_id, str)
+    }
+    if not allowed_ids:
+        raise NotFound("share file not found")
+
+    requested_items = list(payload.articles)
+    requested_ids = [item.id for item in requested_items]
+    rows = (
+        await s.execute(select(Article).where(Article.id.in_(requested_ids)))
+    ).scalars().all()
+    row_map = {article.id: article for article in rows if article.id in allowed_ids}
+
+    updated_ids: list[UUID] = []
+    missing_ids: list[UUID] = []
+    for item in requested_items:
+        article = row_map.get(item.id)
+        if article is None:
+            missing_ids.append(item.id)
+            continue
+        final_md = strip_background_notes_md(item.content_md).strip()
+        if not final_md:
+            missing_ids.append(item.id)
+            continue
+        title = (item.title or _extract_title_from_markdown(final_md) or article.title).strip()
+        summary = (item.summary or _extract_summary_from_markdown(final_md) or article.summary).strip()
+        tags = item.tags if item.tags is not None else article.tags
+        article.title = title or article.title
+        article.summary = summary
+        article.content_md = final_md
+        article.content_html = md_to_html(final_md)
+        article.word_count = word_count_cn(final_md)
+        article.tags = [str(tag)[:16] for tag in (tags or [])[:4]]
+        updated_ids.append(article.id)
+
+    await s.commit()
+    return ArticleClaudeWritebackOut(
+        share_id=share_id,
+        requested=len(requested_items),
+        updated=len(updated_ids),
+        updated_ids=updated_ids,
         missing_ids=missing_ids,
     )
 

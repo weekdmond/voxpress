@@ -141,6 +141,21 @@
   font-size: 10.5px;
   color: var(--vp-ink-3);
 }
+.metaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 2px;
+  font-family: var(--vp-font-mono);
+  font-size: 10.5px;
+  color: var(--vp-ink-3);
+}
+.metaRow b {
+  font-weight: 600;
+  color: var(--vp-ink-2);
+  text-align: right;
+}
 .statusDot {
   width: 8px;
   height: 8px;

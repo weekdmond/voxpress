@@ -1,0 +1,11 @@
+[Unit]
+Description=Run VoxPress auto deploy every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=voxpress-auto-deploy.service
+
+[Install]
+WantedBy=timers.target
+
