@@ -386,6 +386,7 @@ class TaskRunner:
             )
             organized["topics"] = classification.get("topics") or []
             organized["tags"] = classification.get("tags") or []
+            organized["entities"] = classification.get("entities") or {}
             if isinstance(classification, dict) and classification.get("_usage") and usage:
                 usage = merge_usage(usage, classification.get("_usage"))
             elif isinstance(classification, dict) and classification.get("_usage"):
@@ -394,6 +395,7 @@ class TaskRunner:
             logger.warning("article classification failed for %s: %s", ctx.video.id, exc)
             organized["topics"] = []
             organized["tags"] = clean_keyword_tags(organized.get("tags"))
+            organized["entities"] = {}
         if isinstance(organized, dict):
             organized["_usage"] = usage
         return organized
@@ -703,6 +705,7 @@ class TaskRunner:
             article.word_count = final_word_count
             article.tags = organized["tags"]
             article.topics = list(organized.get("topics") or [])
+            article.entities = dict(organized.get("entities") or {})
             article.background_notes = background_notes
             article.likes_snapshot = meta.likes
             article.published_at = _parse_iso(meta.published_at_iso)

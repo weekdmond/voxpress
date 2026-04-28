@@ -24,7 +24,12 @@ from voxpress.prompts import (
 )
 from voxpress.runtime_settings import load_dashscope_runtime_settings
 from voxpress.task_metrics import llm_usage_from_dashscope, merge_usage
-from voxpress.topic_taxonomy import clean_keyword_tags, normalize_topic_selection
+from voxpress.topic_taxonomy import (
+    clean_article_keywords,
+    clean_keyword_tags,
+    normalize_article_entities,
+    normalize_topic_selection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -229,10 +234,16 @@ class DashScopeLLM(LLMBackend):
             allowed_paths=taxonomy_paths,
             synonyms=synonyms,
         )
-        tags = clean_keyword_tags(result.data.get("tags") or result.data.get("keywords"))
+        entities = normalize_article_entities(result.data.get("entities"), creator_hint=creator_hint)
+        tags = clean_article_keywords(
+            result.data.get("tags") or result.data.get("keywords"),
+            entities=entities,
+            creator_hint=creator_hint,
+        )
         return {
             "topics": topics,
             "tags": tags,
+            "entities": entities,
             "_usage": result.usage,
             "_primary_model": self.model,
         }
@@ -589,19 +600,32 @@ _CLASSIFY_SYSTEM_PROMPT = """你是 SpeechFolio 的文章主题分类器。
 
 任务:
 1. 从给定 taxonomy 中选择 1-3 个 topic/subtopic 路径作为文章主题
-2. 给 0-4 个具体关键词作为 tags
+2. 抽取命名实体 entities
+3. 给 0-4 个非实体关键词作为 tags
 
 严格规则:
 - topics 必须从候选路径中原样选择,不要发明新路径
-- tags 是自由关键词,但必须具体,优先人物、公司、品牌、产品、方法、事件、行业名
+- entities 用来放创作者、人名、机构、品牌、产品、地点和事件
+- tags 用来放概念、方法、行业词、问题类型、内容关键词
+- tags 不要包含创作者名、人名、公司/机构名、品牌名、产品名、地点名
 - tags 不要输出"思考"、"分享"、"干货"、"认知"、"观点"这类泛词
 - tags 不带 #,不带空格,每个 2-8 个中文字符为宜
+- entities 中每类最多 5 个,不要为了凑数输出低相关实体
 - 只输出 JSON,不要任何解释
 
 JSON:
 {
   "topics": ["金融投资/股票市场"],
-  "tags": ["茅台", "渠道库存"]
+  "tags": ["渠道库存", "价格倒挂"],
+  "entities": {
+    "creators": ["金枪大叔"],
+    "people": ["雷军"],
+    "organizations": ["美联储"],
+    "brands": ["小米"],
+    "products": ["SU7"],
+    "places": ["纽约"],
+    "events": ["俄乌冲突"]
+  }
 }
 """
 
@@ -629,7 +653,7 @@ def _classify_user_prompt(
         f"{head}\n\n"
         "【正文结尾】\n"
         f"{tail}\n\n"
-        "请输出这篇文章的 topics 和 tags。"
+        "请输出这篇文章的 topics、tags 和 entities。"
     )
 
 

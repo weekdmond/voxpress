@@ -2,6 +2,7 @@ import type { Article, ArticleDetail } from '@/types/api';
 
 const base: Omit<Article, 'id' | 'video_id' | 'creator_id' | 'title' | 'summary' | 'content_md' | 'content_html' | 'word_count' | 'tags' | 'topics' | 'background_notes' | 'likes_snapshot' | 'published_at'> = {
   cover_url: null,
+  entities: {},
   created_at: '2026-04-18T12:00:00Z',
   updated_at: '2026-04-18T12:00:00Z',
 };

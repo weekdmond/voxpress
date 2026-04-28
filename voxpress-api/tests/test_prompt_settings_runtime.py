@@ -62,6 +62,7 @@ async def test_organize_stage_uses_prompt_settings_for_article_and_background(mo
     assert organized["title"] == "整理标题"
     assert organized["topics"] == ["科技数码/AI大模型"]
     assert organized["tags"] == ["AI"]
+    assert organized["entities"] == {"creators": ["创作者"], "people": [], "organizations": []}
     assert llm.organize_kwargs["prompt_template"] == "custom organizer prompt"
     assert llm.annotate_kwargs["prompt_template"] == "custom background prompt"
     assert llm.classify_kwargs["taxonomy_paths"] == ["金融投资/股票市场", "科技数码/AI大模型"]
@@ -95,5 +96,6 @@ class _FakeLLM:
         return {
             "topics": ["科技数码/AI大模型"],
             "tags": ["AI"],
+            "entities": {"creators": ["创作者"], "people": [], "organizations": []},
             "_usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
         }

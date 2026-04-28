@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 
+ENTITY_KEYS = ("creators", "people", "organizations", "brands", "products", "places", "events")
 
 DEFAULT_TOPIC_TAXONOMY: list[dict[str, Any]] = [
     {
@@ -150,6 +151,43 @@ def clean_keyword_tags(values: Any, *, max_items: int = 4, max_len: int = 16) ->
     return _dedupe(cleaned)[:max_items]
 
 
+def normalize_article_entities(
+    value: Any,
+    *,
+    creator_hint: str = "",
+    max_items_per_key: int = 8,
+) -> dict[str, list[str]]:
+    raw = value if isinstance(value, Mapping) else {}
+    entities: dict[str, list[str]] = {}
+    for key in ENTITY_KEYS:
+        values = raw.get(key)
+        if not isinstance(values, list):
+            values = []
+        cleaned = [_clean_label(item, max_len=24) for item in values]
+        entities[key] = _dedupe(item for item in cleaned if item)[:max_items_per_key]
+
+    creator = _clean_label(creator_hint, max_len=24)
+    if creator:
+        entities["creators"] = _dedupe([creator, *entities["creators"]])[:max_items_per_key]
+    return entities
+
+
+def clean_article_keywords(
+    values: Any,
+    *,
+    entities: Mapping[str, list[str]] | None = None,
+    creator_hint: str = "",
+    max_items: int = 4,
+) -> list[str]:
+    blocked = _entity_blocklist(entities or {}, creator_hint=creator_hint)
+    tags: list[str] = []
+    for tag in clean_keyword_tags(values, max_items=24):
+        if _is_blocked_tag(tag, blocked):
+            continue
+        tags.append(tag)
+    return _dedupe(tags)[:max_items]
+
+
 def _clean_topic_path(value: Any) -> str:
     text = str(value or "").replace("／", "/").strip().strip("#")
     text = re.sub(r"\s+", "", text)
@@ -173,6 +211,24 @@ def _dedupe(values) -> list[str]:
         seen.add(value)
         out.append(value)
     return out
+
+
+def _entity_blocklist(entities: Mapping[str, list[str]], *, creator_hint: str) -> set[str]:
+    blocked = {_clean_label(creator_hint, max_len=24)}
+    for values in entities.values():
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            clean = _clean_label(value, max_len=24)
+            if clean:
+                blocked.add(clean)
+    return {item for item in blocked if item}
+
+
+def _is_blocked_tag(tag: str, blocked: set[str]) -> bool:
+    if tag in blocked:
+        return True
+    return any(len(item) >= 2 and (tag in item or item in tag) for item in blocked)
 
 
 def _unique_subtopic_map(paths: list[str]) -> dict[str, str]:

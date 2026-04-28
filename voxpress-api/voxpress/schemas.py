@@ -155,6 +155,7 @@ class ArticleOut(BaseModel):
     word_count: int
     tags: list[str]
     topics: list[str] = Field(default_factory=list)
+    entities: dict[str, list[str]] = Field(default_factory=dict)
     background_notes: dict[str, Any] | None = None
     likes_snapshot: int
     duration_sec: int = 0
@@ -206,6 +207,7 @@ class ArticlePatch(BaseModel):
     title: str | None = None
     tags: list[str] | None = None
     topics: list[str] | None = None
+    entities: dict[str, list[str]] | None = None
     content_md: str | None = None
 
 

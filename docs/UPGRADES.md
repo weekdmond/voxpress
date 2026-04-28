@@ -49,3 +49,4 @@ Things that need product or engineering decisions later.
 ## Records
 
 - [2026-04-28 Tag / Topic Taxonomy Upgrade](./upgrades/2026-04-28-tag-topic-taxonomy.md)
+- [2026-04-28 Tags / Entities Cleanup](./upgrades/2026-04-28-tags-entities-cleanup.md)

@@ -97,4 +97,4 @@ class LLMBackend(Protocol):
         creator_hint: str,
         taxonomy_paths: list[str],
         synonyms: dict[str, str],
-    ) -> dict: ...  # {topics, tags}
+    ) -> dict: ...  # {topics, tags, entities}

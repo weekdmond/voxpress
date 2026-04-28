@@ -193,6 +193,7 @@ async def seed() -> None:
                 word_count=meta["word_count"],
                 tags=meta["tags"],
                 topics=[],
+                entities={},
                 likes_snapshot=meta["likes"],
                 published_at=video.published_at,
             )

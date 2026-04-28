@@ -10,6 +10,15 @@ const REBUILD_STAGE_OPTIONS: { v: RebuildStage; label: string }[] = [
   { v: 'correct', label: '从校对开始' },
   { v: 'organize', label: '从整理开始' },
 ];
+const ENTITY_LABELS: Record<string, string> = {
+  creators: '创作者',
+  people: '人物',
+  organizations: '机构',
+  brands: '品牌',
+  products: '产品',
+  places: '地点',
+  events: '事件',
+};
 import { toast } from 'sonner';
 import { Page } from '@/layouts/AppShell';
 import { ClaudeShareDialog } from '@/components/ClaudeShare/ClaudeShareDialog';
@@ -141,6 +150,13 @@ export function ArticlePage() {
     const search = buildArticleListSearchParams({ ...listState, page }).toString();
     return search ? `/articles/${articleId}?${search}` : `/articles/${articleId}`;
   };
+  const entityGroups = Object.entries(art.entities ?? {})
+    .map(([key, values]) => ({
+      key,
+      label: ENTITY_LABELS[key] ?? key,
+      values: (values ?? []).filter(Boolean),
+    }))
+    .filter((group) => group.values.length > 0);
 
   return (
     <Page>
@@ -325,6 +341,17 @@ export function ArticlePage() {
                 </Chip>
               ))}
             </div>
+            {entityGroups.length > 0 ? (
+              <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {entityGroups.flatMap((group) =>
+                  group.values.map((value) => (
+                    <Chip key={`${group.key}:${value}`}>
+                      {group.label}:{value}
+                    </Chip>
+                  )),
+                )}
+              </div>
+            ) : null}
           </ReaderArticle>
           {split ? (
             <Drawer

@@ -12,6 +12,17 @@ export interface FacetItem {
   count: number;
 }
 
+export interface ArticleEntities {
+  creators?: string[];
+  people?: string[];
+  organizations?: string[];
+  brands?: string[];
+  products?: string[];
+  places?: string[];
+  events?: string[];
+  [key: string]: string[] | undefined;
+}
+
 export interface Health {
   ok: boolean;
   version: string;
@@ -79,6 +90,7 @@ export interface Article {
   word_count: number;
   tags: string[];
   topics: string[];
+  entities: ArticleEntities;
   background_notes?: BackgroundNotes | null;
   likes_snapshot: number;
   duration_sec?: number;

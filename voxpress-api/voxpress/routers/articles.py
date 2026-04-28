@@ -229,6 +229,24 @@ def _transcript_text(transcript: Transcript | None) -> tuple[str, str]:
     return "\n".join(part for part in parts if part), "逐字稿分段"
 
 
+def _format_entities_md(entities: dict[str, list[str]] | None) -> str:
+    labels = {
+        "creators": "创作者",
+        "people": "人物",
+        "organizations": "机构",
+        "brands": "品牌",
+        "products": "产品",
+        "places": "地点",
+        "events": "事件",
+    }
+    parts: list[str] = []
+    for key, label in labels.items():
+        values = [str(value) for value in (entities or {}).get(key, []) if value]
+        if values:
+            parts.append(f"{label}: {', '.join(values)}")
+    return "；".join(parts) if parts else "—"
+
+
 def _build_claude_bundle(
     rows: list[tuple[Article, Creator, Video, Transcript | None]],
     *,
@@ -256,6 +274,7 @@ def _build_claude_bundle(
                 f"- 发布时间: {_md_scalar(article.published_at)}",
                 f"- 主题: {', '.join(article.topics) if article.topics else '—'}",
                 f"- 标签: {', '.join(article.tags) if article.tags else '—'}",
+                f"- 实体: {_format_entities_md(article.entities)}",
                 f"- 摘要: {_md_scalar(article.summary)}",
                 "",
             ]
@@ -592,6 +611,8 @@ async def patch_article(
         art.tags = payload.tags
     if payload.topics is not None:
         art.topics = payload.topics
+    if payload.entities is not None:
+        art.entities = payload.entities
     if payload.content_md is not None:
         final_md = strip_background_notes_md(payload.content_md)
         art.content_md = final_md

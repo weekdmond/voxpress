@@ -1,9 +1,10 @@
-"""Reclassify existing articles into controlled topics and cleaned tags.
+"""Reclassify existing articles into controlled topics, cleaned tags, and entities.
 
 Examples:
 
     uv run python -m voxpress.jobs.reclassify_article_topics --dry-run --limit 20
     uv run python -m voxpress.jobs.reclassify_article_topics --apply --resume --limit 200
+    uv run python -m voxpress.jobs.reclassify_article_topics --apply --limit 200
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ class Candidate:
     creator_name: str
     current_topics: list[str]
     current_tags: list[str]
+    current_entities: dict[str, Any]
 
 
 @dataclass(slots=True)
@@ -41,6 +43,7 @@ class Result:
     candidate: Candidate
     topics: list[str]
     tags: list[str]
+    entities: dict[str, Any]
     error: str | None = None
 
 
@@ -50,12 +53,22 @@ def _parse_args() -> argparse.Namespace:
     mode.add_argument("--dry-run", action="store_true", help="Run classification without writing changes.")
     mode.add_argument("--apply", action="store_true", help="Write topics/tags back to articles.")
     parser.add_argument("--resume", action="store_true", help="Only classify articles with empty topics.")
+    parser.add_argument(
+        "--resume-missing-entities",
+        action="store_true",
+        help="Only classify articles whose entities object is empty.",
+    )
     parser.add_argument("--limit", type=int, default=50, help="Maximum articles to classify.")
     parser.add_argument("--concurrency", type=int, default=2, help="Concurrent DashScope calls.")
     return parser.parse_args()
 
 
-async def _load_candidates(*, limit: int, resume: bool) -> list[Candidate]:
+async def _load_candidates(
+    *,
+    limit: int,
+    resume: bool,
+    resume_missing_entities: bool,
+) -> list[Candidate]:
     stmt = (
         select(Article, Creator.name, Video.title)
         .join(Creator, Creator.id == Article.creator_id)
@@ -65,6 +78,8 @@ async def _load_candidates(*, limit: int, resume: bool) -> list[Candidate]:
     )
     if resume:
         stmt = stmt.where(func.cardinality(Article.topics) == 0)
+    if resume_missing_entities:
+        stmt = stmt.where(Article.entities == {})
 
     async with session_scope() as s:
         rows = (await s.execute(stmt)).all()
@@ -78,6 +93,7 @@ async def _load_candidates(*, limit: int, resume: bool) -> list[Candidate]:
             creator_name=creator_name,
             current_topics=list(article.topics or []),
             current_tags=list(article.tags or []),
+            current_entities=dict(article.entities or {}),
         )
         for article, creator_name, source_title in rows
     ]
@@ -103,11 +119,12 @@ async def _classify_candidate(
                 synonyms=synonyms,
             )
         except Exception as exc:  # noqa: BLE001
-            return Result(candidate=candidate, topics=[], tags=[], error=str(exc))
+            return Result(candidate=candidate, topics=[], tags=[], entities={}, error=str(exc))
     return Result(
         candidate=candidate,
-        topics=list(payload.get("topics") or []),
+        topics=list(payload.get("topics") or candidate.current_topics),
         tags=list(payload.get("tags") or []),
+        entities=dict(payload.get("entities") or {}),
     )
 
 
@@ -120,10 +137,15 @@ async def _apply_results(results: list[Result]) -> int:
             article = await s.get(Article, result.candidate.article_id)
             if article is None:
                 continue
-            if article.topics == result.topics and article.tags == result.tags:
+            if (
+                article.topics == result.topics
+                and article.tags == result.tags
+                and article.entities == result.entities
+            ):
                 continue
             article.topics = result.topics
             article.tags = result.tags
+            article.entities = result.entities
             changed += 1
     return changed
 
@@ -140,6 +162,8 @@ def _print_summary(*, results: list[Result], applied: bool, changed: int) -> Non
                 "new_topics": result.topics,
                 "old_tags": result.candidate.current_tags,
                 "new_tags": result.tags,
+                "old_entities": result.candidate.current_entities,
+                "new_entities": result.entities,
                 "error": result.error,
             }
         )
@@ -160,7 +184,11 @@ def _print_summary(*, results: list[Result], applied: bool, changed: int) -> Non
 
 async def _run(args: argparse.Namespace) -> int:
     applied = bool(args.apply)
-    candidates = await _load_candidates(limit=args.limit, resume=bool(args.resume))
+    candidates = await _load_candidates(
+        limit=args.limit,
+        resume=bool(args.resume),
+        resume_missing_entities=bool(args.resume_missing_entities),
+    )
     taxonomy = await load_topic_taxonomy_runtime_settings()
     model = await runner.current_llm_model()
     llm = DashScopeLLM(model=model)

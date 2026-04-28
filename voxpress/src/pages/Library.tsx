@@ -33,7 +33,8 @@ export function LibraryPage() {
         meta={
           <>
             <span>{total} 个来源</span>
-            <span>· 按粉丝排序</span>
+            <span>· 创作者内容资产库</span>
+            <span>· 按受众规模排序</span>
           </>
         }
       />
@@ -53,9 +54,9 @@ export function LibraryPage() {
           variant={verifiedOnly ? 'accent' : 'default'}
           style={{ cursor: 'pointer' }}
         >
-          蓝V · {verifiedCount}
+          已认证 · {verifiedCount}
         </Chip>
-        <Chip>抖音</Chip>
+        <Chip>公开来源</Chip>
         <span style={{ flex: 1 }} />
         <div style={{ width: 280 }}>
           <Input
@@ -74,13 +75,13 @@ export function LibraryPage() {
         <ArtHead>
           <ArtHead.Cell flex={2}>来源</ArtHead.Cell>
           <ArtHead.Cell flex={1} align="right">
-            粉丝 ↓
+            受众 ↓
           </ArtHead.Cell>
           <ArtHead.Cell flex={0.7} align="right">
             文章
           </ArtHead.Cell>
           <ArtHead.Cell flex={0.7} align="right">
-            视频
+            内容
           </ArtHead.Cell>
           <ArtHead.Cell flex={1} align="right">
             获赞
@@ -119,7 +120,7 @@ export function LibraryPage() {
               {c.recent_update_at ? formatRelative(c.recent_update_at) : '—'}
             </ArtRow.Mono>
             <ArtRow.Mono flex={0.6} align="right">
-              {c.verified ? <Chip variant="ok">蓝V</Chip> : '—'}
+              {c.verified ? <Chip variant="ok">已认证</Chip> : '—'}
             </ArtRow.Mono>
           </ArtRow>
         ))}

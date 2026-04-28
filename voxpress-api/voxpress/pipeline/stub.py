@@ -13,7 +13,11 @@ from voxpress.pipeline.protocols import (
     Transcriber,
     TranscriptResult,
 )
-from voxpress.topic_taxonomy import clean_keyword_tags, normalize_topic_selection
+from voxpress.topic_taxonomy import (
+    clean_article_keywords,
+    normalize_article_entities,
+    normalize_topic_selection,
+)
 
 
 class StubExtractor(Extractor):
@@ -124,5 +128,6 @@ class StubLLM(LLMBackend):
             allowed_paths=taxonomy_paths,
             synonyms=synonyms,
         )
-        tags = clean_keyword_tags([title.split("，")[0], creator_hint, "AI"])
-        return {"topics": topics[:2], "tags": tags[:4]}
+        entities = normalize_article_entities({"creators": [creator_hint]}, creator_hint=creator_hint)
+        tags = clean_article_keywords([title.split("，")[0], creator_hint, "AI"], entities=entities)
+        return {"topics": topics[:2], "tags": tags[:4], "entities": entities}
