@@ -24,6 +24,7 @@ from voxpress.prompts import (
 )
 from voxpress.runtime_settings import load_dashscope_runtime_settings
 from voxpress.task_metrics import llm_usage_from_dashscope, merge_usage
+from voxpress.topic_taxonomy import clean_keyword_tags, normalize_topic_selection
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +198,44 @@ class DashScopeLLM(LLMBackend):
             notes["_usage"] = result.usage
             notes["_primary_model"] = self.model
         return notes
+
+    async def classify_article(
+        self,
+        *,
+        title: str,
+        summary: str,
+        content_md: str,
+        source_title: str,
+        creator_hint: str,
+        taxonomy_paths: list[str],
+        synonyms: dict[str, str],
+    ) -> dict[str, Any]:
+        result = await self.client.chat_json_result(
+            model=self.model,
+            system=_CLASSIFY_SYSTEM_PROMPT,
+            user=_classify_user_prompt(
+                title=title,
+                summary=summary,
+                content_md=content_md,
+                source_title=source_title,
+                creator_hint=creator_hint,
+                taxonomy_paths=taxonomy_paths,
+            ),
+            temperature=0.1,
+            timeout_sec=180.0,
+        )
+        topics = normalize_topic_selection(
+            result.data.get("topics"),
+            allowed_paths=taxonomy_paths,
+            synonyms=synonyms,
+        )
+        tags = clean_keyword_tags(result.data.get("tags") or result.data.get("keywords"))
+        return {
+            "topics": topics,
+            "tags": tags,
+            "_usage": result.usage,
+            "_primary_model": self.model,
+        }
 
 
 class DashScopeCorrector:
@@ -546,6 +585,61 @@ def _organized_score(content_md: str) -> tuple[int, int]:
     return (content_len, section_count)
 
 
+_CLASSIFY_SYSTEM_PROMPT = """你是 SpeechFolio 的文章主题分类器。
+
+任务:
+1. 从给定 taxonomy 中选择 1-3 个 topic/subtopic 路径作为文章主题
+2. 给 0-4 个具体关键词作为 tags
+
+严格规则:
+- topics 必须从候选路径中原样选择,不要发明新路径
+- tags 是自由关键词,但必须具体,优先人物、公司、品牌、产品、方法、事件、行业名
+- tags 不要输出"思考"、"分享"、"干货"、"认知"、"观点"这类泛词
+- tags 不带 #,不带空格,每个 2-8 个中文字符为宜
+- 只输出 JSON,不要任何解释
+
+JSON:
+{
+  "topics": ["金融投资/股票市场"],
+  "tags": ["茅台", "渠道库存"]
+}
+"""
+
+
+def _classify_user_prompt(
+    *,
+    title: str,
+    summary: str,
+    content_md: str,
+    source_title: str,
+    creator_hint: str,
+    taxonomy_paths: list[str],
+) -> str:
+    head, tail = _article_head_tail(content_md)
+    taxonomy = "\n".join(f"- {path}" for path in taxonomy_paths)
+    return (
+        "【候选 taxonomy】\n"
+        f"{taxonomy}\n\n"
+        "【文章】\n"
+        f"来源标题:{source_title}\n"
+        f"整理标题:{title}\n"
+        f"作者:{creator_hint}\n"
+        f"摘要:{summary}\n\n"
+        "【正文开头】\n"
+        f"{head}\n\n"
+        "【正文结尾】\n"
+        f"{tail}\n\n"
+        "请输出这篇文章的 topics 和 tags。"
+    )
+
+
+def _article_head_tail(content_md: str, *, max_chars: int = 240) -> tuple[str, str]:
+    text = re.sub(r"\s+", " ", content_md).strip()
+    if len(text) <= max_chars * 2:
+        return text, text
+    return text[:max_chars], text[-max_chars:]
+
+
 def _organize_user_prompt(
     *,
     transcript: str,
@@ -581,9 +675,7 @@ def _organize_user_prompt(
         "{\n"
         '  "title": "≤30 字。忠于作者实际讨论的内容,陈述式标题。不要问句、不要营销式。",\n'
         '  "summary": "≤60 字,一句话概括作者的核心立场,保留作者语气强度与锋芒,不是中性摘要。",\n'
-        '  "content_md": "Markdown 正文。遵循系统指令里的原则、禁止项、结构规范。",\n'
-        '  "tags": ["2-4 个中文标签,具体到行业/话题/方法论,不要\'思考\'\'分享\'这种泛词"]'
-        "\n"
+        '  "content_md": "Markdown 正文。遵循系统指令里的原则、禁止项、结构规范。"\n'
         "}\n\n"
         "只输出 JSON,不要任何解释或代码围栏。"
     )
@@ -600,7 +692,7 @@ def _normalize_organized_payload(data: dict[str, Any], *, title_hint: str) -> di
         "title": title,
         "summary": summary,
         "content_md": content_md or f"# {title}\n\n> {summary}",
-        "tags": [str(tag)[:16] for tag in tags[:4]],
+        "tags": clean_keyword_tags(tags),
     }
 
 

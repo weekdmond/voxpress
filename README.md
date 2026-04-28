@@ -82,6 +82,10 @@ npm run dev
 - 06-data-models.md
 - 07-interactions.md
 
+## 升级记录
+
+所有非平凡升级都需要先写设计记录，统一放在 [docs/UPGRADES.md](docs/UPGRADES.md)。
+
 ## 已知限制
 
 - 单用户、单机、无鉴权(MVP 范围)

@@ -199,6 +199,7 @@ def _build_claude_bundle(
                 f"- 创作者: {creator.name} ({creator.handle})",
                 f"- 来源链接: {video.source_url}",
                 f"- 发布时间: {_md_scalar(article.published_at)}",
+                f"- 主题: {', '.join(article.topics) if article.topics else '—'}",
                 f"- 标签: {', '.join(article.tags) if article.tags else '—'}",
                 f"- 摘要: {_md_scalar(article.summary)}",
                 "",
@@ -366,6 +367,7 @@ async def list_articles(
     q: str | None = None,
     creator_id: int | None = None,
     tag: str | None = None,
+    topic: str | None = None,
     since: str | None = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -384,6 +386,10 @@ async def list_articles(
         total_stmt = total_stmt.where(predicate)
     if tag:
         predicate = Article.tags.any(tag)
+        stmt = stmt.where(predicate)
+        total_stmt = total_stmt.where(predicate)
+    if topic:
+        predicate = Article.topics.any(topic)
         stmt = stmt.where(predicate)
         total_stmt = total_stmt.where(predicate)
     if since and since.endswith("d"):
@@ -475,7 +481,7 @@ async def get_article(article_id: UUID, s: AsyncSession = Depends(get_session)) 
             "collects": video.collects,
             "plays": video.plays,
         },
-        topics=list(art.tags),
+        topics=list(art.topics or []),
         creator_snapshot={
             "name": creator.name,
             "handle": creator.handle,
@@ -520,6 +526,8 @@ async def patch_article(
         art.title = payload.title
     if payload.tags is not None:
         art.tags = payload.tags
+    if payload.topics is not None:
+        art.topics = payload.topics
     if payload.content_md is not None:
         final_md = strip_background_notes_md(payload.content_md)
         art.content_md = final_md

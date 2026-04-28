@@ -12,6 +12,7 @@ from voxpress.prompts import (
     DEFAULT_ORGANIZER_TEMPLATE,
     DEFAULT_PROMPT_VERSION,
 )
+from voxpress.topic_taxonomy import DEFAULT_TOPIC_SYNONYMS, DEFAULT_TOPIC_TAXONOMY
 
 # ─── Shared ─────────────────────────────────────────
 
@@ -153,6 +154,7 @@ class ArticleOut(BaseModel):
     content_html: str
     word_count: int
     tags: list[str]
+    topics: list[str] = Field(default_factory=list)
     background_notes: dict[str, Any] | None = None
     likes_snapshot: int
     duration_sec: int = 0
@@ -193,6 +195,7 @@ class ArticleDetailOut(ArticleOut):
 class ArticlePatch(BaseModel):
     title: str | None = None
     tags: list[str] | None = None
+    topics: list[str] | None = None
     content_md: str | None = None
 
 
@@ -440,6 +443,25 @@ class PromptSettingsPatch(BaseModel):
     background_notes_template: str | None = None
 
 
+class TopicTaxonomyNode(BaseModel):
+    topic: str
+    subtopics: list[str] = Field(default_factory=list)
+
+
+class TopicTaxonomySettings(BaseModel):
+    version: str = "v1"
+    taxonomy: list[TopicTaxonomyNode] = Field(
+        default_factory=lambda: [TopicTaxonomyNode.model_validate(node) for node in DEFAULT_TOPIC_TAXONOMY]
+    )
+    synonyms: dict[str, str] = Field(default_factory=lambda: dict(DEFAULT_TOPIC_SYNONYMS))
+
+
+class TopicTaxonomySettingsPatch(BaseModel):
+    version: str | None = None
+    taxonomy: list[TopicTaxonomyNode] | None = None
+    synonyms: dict[str, str] | None = None
+
+
 class CookieSettings(BaseModel):
     status: Literal["missing", "ok", "expired"] = "missing"
     last_tested_at: datetime | None = None
@@ -482,6 +504,7 @@ class SettingsOut(BaseModel):
     corrector: CorrectorSettings
     article: ArticleSettings
     prompt: PromptSettings
+    topic_taxonomy: TopicTaxonomySettings
     cookie: CookieSettings
     dashscope: DashScopeSettingsOut
     oss: OssSettingsOut
@@ -494,6 +517,7 @@ class SettingsPatch(BaseModel):
     corrector: CorrectorSettings | None = None
     article: ArticleSettings | None = None
     prompt: PromptSettingsPatch | None = None
+    topic_taxonomy: TopicTaxonomySettingsPatch | None = None
     cookie: CookieSettings | None = None
     dashscope: DashScopeSettingsPatch | None = None
     oss: OssSettingsPatch | None = None

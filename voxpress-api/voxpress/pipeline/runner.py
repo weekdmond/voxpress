@@ -18,7 +18,12 @@ from voxpress.models import Article, Creator, SettingEntry, Task, Transcript, Tr
 from voxpress.pipeline.dashscope import DashScopeCorrector
 from voxpress.pipeline.protocols import Extractor, ExtractorResult, LLMBackend, Transcriber, TranscriptResult
 from voxpress.pipeline.stub import StubExtractor, StubLLM, StubTranscriber
-from voxpress.runtime_settings import load_prompt_runtime_settings
+from voxpress.runtime_settings import (
+    load_prompt_runtime_settings,
+    load_topic_taxonomy_runtime_settings,
+)
+from voxpress.task_metrics import merge_usage
+from voxpress.topic_taxonomy import clean_keyword_tags
 
 logger = logging.getLogger(__name__)
 
@@ -356,8 +361,6 @@ class TaskRunner:
                     prompt_template=prompt_settings.background_notes_template,
                 )
                 if isinstance(background_notes, dict) and background_notes.get("_usage") and usage:
-                    from voxpress.task_metrics import merge_usage
-
                     usage = merge_usage(usage, background_notes.get("_usage"))
                 elif isinstance(background_notes, dict) and background_notes.get("_usage"):
                     usage = background_notes.get("_usage")
@@ -370,6 +373,27 @@ class TaskRunner:
                 organized["background_notes"] = None
         else:
             organized["background_notes"] = None
+        taxonomy = await load_topic_taxonomy_runtime_settings()
+        try:
+            classification = await llm.classify_article(
+                title=str(organized.get("title") or ctx.video.title),
+                summary=str(organized.get("summary") or ""),
+                content_md=str(organized.get("content_md") or ""),
+                source_title=ctx.video.title,
+                creator_hint=ctx.creator.name,
+                taxonomy_paths=taxonomy.paths,
+                synonyms=taxonomy.synonyms,
+            )
+            organized["topics"] = classification.get("topics") or []
+            organized["tags"] = classification.get("tags") or []
+            if isinstance(classification, dict) and classification.get("_usage") and usage:
+                usage = merge_usage(usage, classification.get("_usage"))
+            elif isinstance(classification, dict) and classification.get("_usage"):
+                usage = classification.get("_usage")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("article classification failed for %s: %s", ctx.video.id, exc)
+            organized["topics"] = []
+            organized["tags"] = clean_keyword_tags(organized.get("tags"))
         if isinstance(organized, dict):
             organized["_usage"] = usage
         return organized
@@ -678,6 +702,7 @@ class TaskRunner:
             article.content_html = final_html
             article.word_count = final_word_count
             article.tags = organized["tags"]
+            article.topics = list(organized.get("topics") or [])
             article.background_notes = background_notes
             article.likes_snapshot = meta.likes
             article.published_at = _parse_iso(meta.published_at_iso)

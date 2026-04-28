@@ -13,6 +13,11 @@ from voxpress.prompts import (
     DEFAULT_ORGANIZER_TEMPLATE,
     DEFAULT_PROMPT_VERSION,
 )
+from voxpress.topic_taxonomy import (
+    normalize_synonyms,
+    normalize_taxonomy_nodes,
+    topic_paths,
+)
 
 
 def _clean_str(value: Any) -> str:
@@ -79,6 +84,17 @@ class PromptRuntimeSettings:
     background_notes_template: str
 
 
+@dataclass(slots=True)
+class TopicTaxonomyRuntimeSettings:
+    version: str
+    taxonomy: list[dict[str, Any]]
+    synonyms: dict[str, str]
+
+    @property
+    def paths(self) -> list[str]:
+        return topic_paths(self.taxonomy)
+
+
 def build_dashscope_runtime_settings(
     value: Mapping[str, Any] | None,
 ) -> DashScopeRuntimeSettings:
@@ -121,6 +137,19 @@ def build_prompt_runtime_settings(
     )
 
 
+def build_topic_taxonomy_runtime_settings(
+    value: Mapping[str, Any] | None,
+) -> TopicTaxonomyRuntimeSettings:
+    raw = dict(value or {})
+    taxonomy = normalize_taxonomy_nodes(raw.get("taxonomy"))
+    paths = topic_paths(taxonomy)
+    return TopicTaxonomyRuntimeSettings(
+        version=_coalesce_str(raw.get("version"), "v1"),
+        taxonomy=taxonomy,
+        synonyms=normalize_synonyms(raw.get("synonyms"), allowed_paths=paths),
+    )
+
+
 async def load_setting_value(
     key: str,
     *,
@@ -154,3 +183,12 @@ async def load_prompt_runtime_settings(
     session: AsyncSession | None = None,
 ) -> PromptRuntimeSettings:
     return build_prompt_runtime_settings(await load_setting_value("prompt", session=session))
+
+
+async def load_topic_taxonomy_runtime_settings(
+    *,
+    session: AsyncSession | None = None,
+) -> TopicTaxonomyRuntimeSettings:
+    return build_topic_taxonomy_runtime_settings(
+        await load_setting_value("topic_taxonomy", session=session)
+    )

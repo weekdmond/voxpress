@@ -104,11 +104,13 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
     const q = params.get('q')?.toLowerCase() ?? '';
     const creatorId = params.get('creator_id');
     const tag = params.get('tag');
+    const topic = params.get('topic');
     const since = params.get('since');
     let items: Article[] = [...articles];
     if (q) items = items.filter((a) => a.title.toLowerCase().includes(q) || a.summary.toLowerCase().includes(q) || a.content_md.toLowerCase().includes(q));
     if (creatorId) items = items.filter((a) => a.creator_id === Number(creatorId));
     if (tag) items = items.filter((a) => a.tags.includes(tag));
+    if (topic) items = items.filter((a) => a.topics.includes(topic));
     if (since && since.endsWith('d')) {
       const days = Number(since.slice(0, -1));
       if (days > 0) {

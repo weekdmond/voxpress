@@ -6,7 +6,10 @@ from voxpress.routers.settings import (
 )
 from voxpress.pipeline.runner import _normalize_runtime_settings
 from voxpress.prompts import DEFAULT_BACKGROUND_NOTES_TEMPLATE, DEFAULT_ORGANIZER_TEMPLATE, DEFAULT_PROMPT_VERSION
-from voxpress.runtime_settings import build_prompt_runtime_settings
+from voxpress.runtime_settings import (
+    build_prompt_runtime_settings,
+    build_topic_taxonomy_runtime_settings,
+)
 from voxpress.schemas import SettingsOut, SettingsPatch
 
 
@@ -51,6 +54,9 @@ def test_normalize_settings_dict_exposes_configured_flags_without_leaking_secret
     assert dumped["prompt"]["version"] == DEFAULT_PROMPT_VERSION
     assert dumped["prompt"]["template"] == DEFAULT_ORGANIZER_TEMPLATE.strip()
     assert dumped["prompt"]["background_notes_template"] == DEFAULT_BACKGROUND_NOTES_TEMPLATE.strip()
+    assert dumped["topic_taxonomy"]["version"] == "v1"
+    assert dumped["topic_taxonomy"]["taxonomy"]
+    assert dumped["topic_taxonomy"]["synonyms"]
 
 
 def test_prepare_settings_value_for_storage_strips_derived_secret_status_fields() -> None:
@@ -125,6 +131,20 @@ def test_build_prompt_runtime_settings_preserves_custom_templates() -> None:
     assert runtime.version == "custom-v1"
     assert runtime.organizer_template == "custom organizer prompt"
     assert runtime.background_notes_template == "custom background prompt"
+
+
+def test_build_topic_taxonomy_runtime_settings_normalizes_paths_and_synonyms() -> None:
+    runtime = build_topic_taxonomy_runtime_settings(
+        {
+            "version": "custom-taxonomy",
+            "taxonomy": [{"topic": "金融投资", "subtopics": ["股票市场"]}],
+            "synonyms": {"技术分析": "金融投资/股票市场", "无效": "不存在/路径"},
+        }
+    )
+
+    assert runtime.version == "custom-taxonomy"
+    assert runtime.paths == ["金融投资/股票市场"]
+    assert runtime.synonyms == {"技术分析": "金融投资/股票市场"}
 
 
 def test_prompt_settings_patch_keeps_partial_payload_partial() -> None:

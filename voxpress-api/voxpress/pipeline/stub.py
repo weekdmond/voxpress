@@ -13,6 +13,7 @@ from voxpress.pipeline.protocols import (
     Transcriber,
     TranscriptResult,
 )
+from voxpress.topic_taxonomy import clean_keyword_tags, normalize_topic_selection
 
 
 class StubExtractor(Extractor):
@@ -105,3 +106,23 @@ class StubLLM(LLMBackend):
                 }
             ]
         }
+
+    async def classify_article(
+        self,
+        *,
+        title: str,
+        summary: str,
+        content_md: str,
+        source_title: str,
+        creator_hint: str,
+        taxonomy_paths: list[str],
+        synonyms: dict[str, str],
+    ) -> dict:
+        await asyncio.sleep(0.2)
+        topics = normalize_topic_selection(
+            ["科技数码/AI大模型", "内容创作/表达方法"],
+            allowed_paths=taxonomy_paths,
+            synonyms=synonyms,
+        )
+        tags = clean_keyword_tags([title.split("，")[0], creator_hint, "AI"])
+        return {"topics": topics[:2], "tags": tags[:4]}

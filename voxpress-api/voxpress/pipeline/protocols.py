@@ -86,3 +86,15 @@ class LLMBackend(Protocol):
         article_summary: str,
         prompt_template: str,
     ) -> dict | None: ...
+
+    async def classify_article(
+        self,
+        *,
+        title: str,
+        summary: str,
+        content_md: str,
+        source_title: str,
+        creator_hint: str,
+        taxonomy_paths: list[str],
+        synonyms: dict[str, str],
+    ) -> dict: ...  # {topics, tags}

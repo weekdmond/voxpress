@@ -73,6 +73,7 @@ export interface Article {
   content_html: string;
   word_count: number;
   tags: string[];
+  topics: string[];
   background_notes?: BackgroundNotes | null;
   likes_snapshot: number;
   duration_sec?: number;

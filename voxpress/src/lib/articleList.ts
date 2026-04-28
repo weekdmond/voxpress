@@ -9,6 +9,7 @@ export interface ArticleListState {
   creatorFilter: string;
   time: ArticleTimeFilter;
   tagFilter: string;
+  topicFilter: string;
   sort: ArticleSort;
   q: string;
   page: number;
@@ -37,6 +38,7 @@ export const DEFAULT_ARTICLE_LIST_STATE: ArticleListState = {
   creatorFilter: 'all',
   time: 'all',
   tagFilter: 'all',
+  topicFilter: 'all',
   sort: 'published_at:desc',
   q: '',
   page: 1,
@@ -55,6 +57,7 @@ export function parseArticleListState(input: URLSearchParams | string): ArticleL
     creatorFilter: params.get('creator_id') || DEFAULT_ARTICLE_LIST_STATE.creatorFilter,
     time: rawTime && TIME_SET.has(rawTime) ? rawTime : DEFAULT_ARTICLE_LIST_STATE.time,
     tagFilter: params.get('tag') || DEFAULT_ARTICLE_LIST_STATE.tagFilter,
+    topicFilter: params.get('topic') || DEFAULT_ARTICLE_LIST_STATE.topicFilter,
     sort: rawSort && SORT_SET.has(rawSort) ? rawSort : DEFAULT_ARTICLE_LIST_STATE.sort,
     q: (params.get('q') || '').trim(),
     page: Number.isFinite(rawPage) && rawPage > 0 ? rawPage : DEFAULT_ARTICLE_LIST_STATE.page,
@@ -68,6 +71,9 @@ export function buildArticleListSearchParams(state: ArticleListState): URLSearch
   }
   if (state.tagFilter !== DEFAULT_ARTICLE_LIST_STATE.tagFilter) {
     params.set('tag', state.tagFilter);
+  }
+  if (state.topicFilter !== DEFAULT_ARTICLE_LIST_STATE.topicFilter) {
+    params.set('topic', state.topicFilter);
   }
   if (state.time !== DEFAULT_ARTICLE_LIST_STATE.time) {
     params.set('since', state.time);

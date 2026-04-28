@@ -314,6 +314,11 @@ export function ArticlePage() {
             <div dangerouslySetInnerHTML={{ __html: art.content_html }} />
             <BackgroundNotes notes={art.background_notes} />
             <div style={{ marginTop: 24, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {art.topics.map((t) => (
+                <Chip key={t} variant="solid">
+                  {t}
+                </Chip>
+              ))}
               {art.tags.map((t) => (
                 <Chip key={t} variant="accent">
                   #{t}

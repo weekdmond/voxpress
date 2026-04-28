@@ -1,6 +1,6 @@
 import type { Article, ArticleDetail } from '@/types/api';
 
-const base: Omit<Article, 'id' | 'video_id' | 'creator_id' | 'title' | 'summary' | 'content_md' | 'content_html' | 'word_count' | 'tags' | 'background_notes' | 'likes_snapshot' | 'published_at'> = {
+const base: Omit<Article, 'id' | 'video_id' | 'creator_id' | 'title' | 'summary' | 'content_md' | 'content_html' | 'word_count' | 'tags' | 'topics' | 'background_notes' | 'likes_snapshot' | 'published_at'> = {
   cover_url: null,
   created_at: '2026-04-18T12:00:00Z',
   updated_at: '2026-04-18T12:00:00Z',
@@ -19,6 +19,7 @@ export const articles: Article[] = [
     content_html: html('从 M5 到 M5 Max 的跳跃,最大的变化不是 CPU,而是统一内存的带宽和调度策略。今天我们实测 Qwen2.5-72B INT4 在 llama.cpp Metal 后端的吞吐,以及它作为本地 writer 的工程可行性。'),
     word_count: 2146,
     tags: ['AI', '本地推理'],
+    topics: ['科技数码/AI大模型'],
     background_notes: null,
     likes_snapshot: 45200,
     published_at: '2026-04-18T11:00:00Z',
@@ -34,6 +35,7 @@ export const articles: Article[] = [
     content_html: html('大公司里设计和开发的信息差,是每一次周四晚上 PM 最焦虑的来源。今天讲我们如何用一个 Figma 插件 + 一份结构化 spec 模板,把交付链路压到三条。'),
     word_count: 1820,
     tags: ['产品', '工作流'],
+    topics: ['科技数码/软件工具'],
     background_notes: null,
     likes_snapshot: 18300,
     published_at: '2026-04-17T15:22:00Z',
@@ -49,6 +51,7 @@ export const articles: Article[] = [
     content_html: html('第一家公司成功之后再出发,最容易犯的不是技术错误,而是心态错误。讲讲我复盘第二家公司前六个月,学到的三件事。'),
     word_count: 2480,
     tags: ['创业'],
+    topics: ['商业经营/创业复盘'],
     background_notes: null,
     likes_snapshot: 8700,
     published_at: '2026-04-16T21:02:00Z',
@@ -64,6 +67,7 @@ export const articles: Article[] = [
     content_html: html('过去两年大家都在等 RSC,但真正把它用在生产里的团队不多。今天讲清楚:RSC 解决的是什么问题,它与 SSR 的关系,以及 2026 年的合理落地姿势。'),
     word_count: 2950,
     tags: ['前端', 'React'],
+    topics: ['科技数码/软件工具'],
     background_notes: null,
     likes_snapshot: 16500,
     published_at: '2026-04-16T10:41:00Z',
@@ -79,6 +83,7 @@ export const articles: Article[] = [
     content_html: html('每次听到"向上管理"被翻译成"会说话",我就想反驳。它真正的内核是帮老板减负,帮他在别人面前讲清楚你的事。'),
     word_count: 1440,
     tags: ['职场'],
+    topics: ['社会观察/职场'],
     background_notes: null,
     likes_snapshot: 23400,
     published_at: '2026-04-10T09:12:00Z',
@@ -94,6 +99,7 @@ export const articles: Article[] = [
     content_html: html('很多人读财报只看同比,那是照片。把最近十二个季度的营收质量放进一张图,你会看到一段完全不同的故事。'),
     word_count: 1780,
     tags: ['投资'],
+    topics: ['金融投资/股票市场'],
     background_notes: null,
     likes_snapshot: 6400,
     published_at: '2026-04-12T18:20:00Z',

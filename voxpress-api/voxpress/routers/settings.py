@@ -16,6 +16,7 @@ from voxpress.runtime_settings import (
     build_dashscope_runtime_settings,
     build_oss_runtime_settings,
     build_prompt_runtime_settings,
+    build_topic_taxonomy_runtime_settings,
 )
 from voxpress.schemas import (
     ArticleSettings,
@@ -28,6 +29,7 @@ from voxpress.schemas import (
     SettingsOut,
     SettingsPatch,
     StorageSettings,
+    TopicTaxonomySettings,
     WhisperSettings,
 )
 
@@ -62,6 +64,7 @@ _DEFAULTS: SettingsOut = SettingsOut(
     corrector=CorrectorSettings(template=DEFAULT_CORRECTOR_TEMPLATE),
     article=ArticleSettings(),
     prompt=PromptSettings(),
+    topic_taxonomy=TopicTaxonomySettings(),
     cookie=CookieSettings(),
     dashscope=DashScopeSettingsOut(),
     oss=OssSettingsOut(),
@@ -234,6 +237,16 @@ def _normalize_settings_dict(data: dict) -> dict:
     prompt["background_notes_template"] = prompt_runtime.background_notes_template
     normalized["prompt"] = prompt
 
+    topic_taxonomy = {
+        **_DEFAULTS.topic_taxonomy.model_dump(),
+        **dict(normalized.get("topic_taxonomy") or {}),
+    }
+    topic_taxonomy_runtime = build_topic_taxonomy_runtime_settings(topic_taxonomy)
+    topic_taxonomy["version"] = topic_taxonomy_runtime.version
+    topic_taxonomy["taxonomy"] = topic_taxonomy_runtime.taxonomy
+    topic_taxonomy["synonyms"] = topic_taxonomy_runtime.synonyms
+    normalized["topic_taxonomy"] = topic_taxonomy
+
     cookie = {**_DEFAULTS.cookie.model_dump(mode="json"), **dict(normalized.get("cookie") or {})}
     normalized["cookie"] = cookie
 
@@ -270,6 +283,13 @@ def _prepare_settings_value_for_storage(key: str, value: dict) -> dict:
             "version": runtime.version,
             "template": runtime.organizer_template,
             "background_notes_template": runtime.background_notes_template,
+        }
+    if key == "topic_taxonomy":
+        runtime = build_topic_taxonomy_runtime_settings(raw)
+        return {
+            "version": runtime.version,
+            "taxonomy": runtime.taxonomy,
+            "synonyms": runtime.synonyms,
         }
     return raw
 

@@ -151,7 +151,7 @@ export function ArticlesPage() {
   const qc = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const listState = useMemo(() => parseArticleListState(searchParams), [searchParams]);
-  const { creatorFilter, time, tagFilter, sort, q, page } = listState;
+  const { creatorFilter, time, tagFilter, topicFilter, sort, q, page } = listState;
   const [qDraft, setQDraft] = useState(q);
   const [openDrop, setOpenDrop] = useState<string | null>(null);
   const [rebuildStage, setRebuildStage] = useState<RebuildStage>('auto');
@@ -222,10 +222,18 @@ export function ArticlesPage() {
   const listTotal = listPage?.total ?? articles.length;
   const totalPages = Math.max(1, Math.ceil(listTotal / ARTICLE_PAGE_SIZE));
   const selectionScope = useMemo(
-    () => JSON.stringify({ creatorFilter, time, tagFilter, q, sort }),
-    [creatorFilter, time, tagFilter, q, sort],
+    () => JSON.stringify({ creatorFilter, time, tagFilter, topicFilter, q, sort }),
+    [creatorFilter, time, tagFilter, topicFilter, q, sort],
   );
   const selection = useCrossPageSelection(selectionScope, articles);
+
+  const topicFacets = useMemo(() => {
+    const counts = new Map<string, number>();
+    articles.forEach((a) => a.topics.forEach((t) => counts.set(t, (counts.get(t) ?? 0) + 1)));
+    return Array.from(counts.entries())
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 12);
+  }, [articles]);
 
   const tagFacets = useMemo(() => {
     const counts = new Map<string, number>();
@@ -342,6 +350,9 @@ export function ArticlesPage() {
     ...(tagFilter !== 'all'
       ? [{ k: '标签', label: `#${tagFilter}`, reset: () => updateListState({ tagFilter: 'all' }, { resetPage: true }) }]
       : []),
+    ...(topicFilter !== 'all'
+      ? [{ k: '主题', label: topicFilter, reset: () => updateListState({ topicFilter: 'all' }, { resetPage: true }) }]
+      : []),
   ];
 
   const creatorOptions = useMemo(() => {
@@ -362,6 +373,14 @@ export function ArticlesPage() {
     return opts;
   }, [tagFacets, listTotal]);
 
+  const topicOptions = useMemo(() => {
+    const opts: { v: string; label: string; count?: number }[] = [
+      { v: 'all', label: '全部', count: listTotal },
+    ];
+    topicFacets.forEach(([t, c]) => opts.push({ v: t, label: t, count: c }));
+    return opts;
+  }, [topicFacets, listTotal]);
+
   const selCount = selection.selectedCount;
   const selectedIds = selection.selectedIds;
 
@@ -372,7 +391,7 @@ export function ArticlesPage() {
         meta={
           <>
             <span>{listTotal} 篇已整理</span>
-            <span>· 支持按创作者、标签、时间筛选</span>
+            <span>· 支持按创作者、主题、标签、时间筛选</span>
           </>
         }
       />
@@ -396,6 +415,16 @@ export function ArticlesPage() {
           openId={openDrop}
           setOpenId={setOpenDrop}
           onSelect={(value) => updateListState({ time: value }, { resetPage: true })}
+        />
+        <Dropdown
+          id="topic"
+          k="主题"
+          value={topicFilter}
+          options={topicOptions}
+          openId={openDrop}
+          setOpenId={setOpenDrop}
+          onSelect={(value) => updateListState({ topicFilter: value }, { resetPage: true })}
+          headerLabel={topicFacets.length ? '高频主题' : undefined}
         />
         <Dropdown
           id="tag"
@@ -479,7 +508,7 @@ export function ArticlesPage() {
             </span>
             <span>文章</span>
             <span>创作者</span>
-            <span>标签</span>
+            <span>主题 / 标签</span>
             <span>指标</span>
             <span>时间</span>
             <span />
@@ -489,8 +518,8 @@ export function ArticlesPage() {
           ) : (
             articles.map((a, i) => {
               const c = creatorMap.get(a.creator_id);
-                const isSel = selection.isSelected(a.id);
-                return (
+              const isSel = selection.isSelected(a.id);
+              return (
                 <div
                   key={a.id}
                   className={[s.tRow, isSel ? s.tRowSelected : ''].join(' ')}
@@ -505,13 +534,13 @@ export function ArticlesPage() {
                 >
                   <span>
                     <button
-                        className={[s.cbx, isSel ? s.cbxOn : ''].join(' ')}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          selection.toggleOne(a);
-                        }}
-                        aria-label="选择"
-                      />
+                      className={[s.cbx, isSel ? s.cbxOn : ''].join(' ')}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        selection.toggleOne(a);
+                      }}
+                      aria-label="选择"
+                    />
                   </span>
                   <div className={s.artCell}>
                     <ArticleCover
@@ -534,13 +563,13 @@ export function ArticlesPage() {
                     </div>
                   </div>
                   <div className={s.tags}>
-                    {a.tags.slice(0, 2).map((t) => (
+                    {(a.topics.length ? a.topics : a.tags).slice(0, 2).map((t) => (
                       <span key={t} className={s.tag}>
-                        #{t}
+                        {a.topics.length ? t : `#${t}`}
                       </span>
                     ))}
-                    {a.tags.length > 2 ? (
-                      <span className={s.tagMore}>+{a.tags.length - 2}</span>
+                    {(a.topics.length ? a.topics : a.tags).length > 2 ? (
+                      <span className={s.tagMore}>+{(a.topics.length ? a.topics : a.tags).length - 2}</span>
                     ) : null}
                   </div>
                   <div className={s.metricsCell}>

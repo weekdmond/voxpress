@@ -104,6 +104,7 @@ class Article(Base):
     __tablename__ = "articles"
     __table_args__ = (
         Index("idx_articles_creator_pub", "creator_id", "published_at"),
+        Index("idx_articles_topics_gin", "topics", postgresql_using="gin"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -121,6 +122,7 @@ class Article(Base):
     content_html: Mapped[str] = mapped_column(Text, nullable=False)
     word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     tags: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    topics: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
     background_notes: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     likes_snapshot: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
