@@ -1,0 +1,34 @@
+# env / secrets
+.env
+.env.*
+!.env.example
+
+# venv（uv 默认在 .venv/）
+.venv/
+venv/
+
+# build / dist
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# uv.lock 故意不忽略——应用项目里 lock 文件应该 commit 以保证复现性
+
+# runs（可能很大，且包含 LLM 输出，单独管理）
+runs/
+!runs/.gitkeep
+
+# user case data（个人 transcript，不进 git）
+cases/case_*.json
+
+# diff 输出
+*.html
+!pl/templates/*.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store

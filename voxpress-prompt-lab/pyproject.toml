@@ -1,0 +1,40 @@
+[project]
+name = "voxpress-prompt-lab"
+version = "0.1.0"
+description = "Prompt tuning + eval workbench for VoxPress / SpeechFolio organize stage"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.40.0",
+    "pydantic>=2.6.0",
+    "python-dotenv>=1.0.0",
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+    "jinja2>=3.1.0",
+    "httpx>=0.27.0",
+]
+
+[project.scripts]
+pl = "pl.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pl"]
+# 默认会把 pl/ 下所有文件打进 wheel，包括 prompts/*.txt
+
+[tool.uv]
+# 开发依赖（uv sync 默认会装；CI 等场景用 --no-dev 跳过）
+dev-dependencies = [
+    "pytest>=8.0.0",
+    "ruff>=0.5.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["E501"]

@@ -1,0 +1,20 @@
+{
+  "case_id": "case_001",
+  "creator": "金枪大叔",
+  "title_hint": "（可选）原视频标题或你心目中的方向",
+  "duration_sec": 360,
+
+  "transcript": "在这里粘贴 ASR 转写的完整文本。\n\n可以是从 voxpress-api DB 里 task_stage_runs.output 字段拷出来的 transcribe 阶段产物，或者直接从抖音视频再跑一遍 ASR。\n\n保留段落、标点；不需要清洗口头禅，pipeline 会做。",
+
+  "label": "中",
+  "note": "（可选）你为什么把现在的输出标成这个 label？例如：'结构散，标题像通稿，结尾烂尾'。这一句对调 prompt 至关重要——告诉模型你嫌弃什么。",
+
+  "_说明": {
+    "case_id": "唯一标识，建议 case_001 ~ case_010 顺序排，文件名也用同样名字（不带 _ 前缀）",
+    "label": "三档：优 / 中 / 差。这是你对当前 voxpress 跑出来的输出的评价，不是对 transcript 本身的评价",
+    "note": "用一两句话写'差在哪 / 好在哪'。这一句是 prompt 调优的方向盘——如果空着，调优等于盲调",
+    "transcript": "建议长度在 300-3000 字之间。太短没区分度，太长一次 LLM call 处理不动；超长可以切 case_xxx_a.json / case_xxx_b.json 两个 case",
+    "title_hint": "可不填。如果你已知原视频标题，填上能让 LLM 更准；不填 LLM 会自己拟",
+    "creator": "可不填。填了 LLM 在某些 prompt 里会用作上下文（如风格 fingerprint）"
+  }
+}
