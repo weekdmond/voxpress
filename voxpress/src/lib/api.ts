@@ -50,12 +50,20 @@ export function apiUrl(path: string): string {
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'POST', body: body == null ? undefined : JSON.stringify(body) }),
-  postForm: <T>(path: string, form: FormData) =>
-    request<T>(path, { method: 'POST', body: form }),
-  patch: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'PATCH', body: body == null ? undefined : JSON.stringify(body) }),
-  del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  get: <T>(path: string, init?: RequestInit) => request<T>(path, init),
+  post: <T>(path: string, body?: unknown, init?: RequestInit) =>
+    request<T>(path, {
+      ...init,
+      method: 'POST',
+      body: body == null ? undefined : JSON.stringify(body),
+    }),
+  postForm: <T>(path: string, form: FormData, init?: RequestInit) =>
+    request<T>(path, { ...init, method: 'POST', body: form }),
+  patch: <T>(path: string, body?: unknown, init?: RequestInit) =>
+    request<T>(path, {
+      ...init,
+      method: 'PATCH',
+      body: body == null ? undefined : JSON.stringify(body),
+    }),
+  del: <T>(path: string, init?: RequestInit) => request<T>(path, { ...init, method: 'DELETE' }),
 };

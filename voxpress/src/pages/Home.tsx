@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Page, PageHead } from '@/layouts/AppShell';
-import { Avatar, Button, Chip, Icon, Input } from '@/components/primitives';
+import { Avatar, Button, Chip, Icon, Input, type IconName } from '@/components/primitives';
 import { ArtCard } from '@/components/ArtCard/ArtCard';
 import { api } from '@/lib/api';
 import { formatDateTime, formatEta, formatRelative } from '@/lib/format';
@@ -23,10 +23,111 @@ type ResolveResult =
       backfill_run_id?: string | null;
     };
 
+interface ResolveProgressStep {
+  icon: IconName;
+  label: string;
+  detail: string;
+  state: 'done' | 'current' | 'pending';
+}
+
 function lookValidDouyin(url: string): boolean {
   if (!url.trim()) return false;
   return /(?:v\.douyin\.com|douyin\.com|iesdouyin\.com)/.test(url);
 }
+
+function looksLikeCreatorShareInput(raw: string): boolean {
+  const value = raw.trim().toLowerCase();
+  return (
+    /查看ta的更多作品|更多作品/.test(raw) ||
+    /douyin\.com\/user\//.test(value) ||
+    /iesdouyin\.com\/share\/user\//.test(value)
+  );
+}
+
+function formatResolveElapsed(ms: number): string {
+  const totalSec = Math.max(1, Math.floor(ms / 1000));
+  if (totalSec < 60) return `${totalSec}s`;
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}m ${sec.toString().padStart(2, '0')}s`;
+}
+
+function buildResolveProgress(raw: string, elapsedMs: number): {
+  headline: string;
+  footnote: string;
+  isSlow: boolean;
+  elapsedLabel: string;
+  steps: ResolveProgressStep[];
+} {
+  const creatorLikely = looksLikeCreatorShareInput(raw);
+  const currentStep =
+    elapsedMs < 1200 ? 0 : elapsedMs < 3200 ? 1 : elapsedMs < 6500 ? 2 : 3;
+
+  const steps: Omit<ResolveProgressStep, 'state'>[] = [
+    {
+      icon: 'download',
+      label: '提取链接',
+      detail: '从分享文案里提取真实链接',
+    },
+    {
+      icon: 'swap',
+      label: '展开短链',
+      detail: '跟随 v.douyin.com 跳转到真实地址',
+    },
+    {
+      icon: 'search',
+      label: '识别类型',
+      detail: '判断这是单视频还是创作者主页',
+    },
+    creatorLikely
+      ? {
+          icon: 'users',
+          label: '同步主页',
+          detail: '抓取创作者主页与最近公开视频列表',
+        }
+      : {
+          icon: 'check',
+          label: '创建任务',
+          detail: '单视频会直接入队，主页会继续同步内容',
+        },
+  ];
+
+  let headline = '正在提取分享文案里的链接…';
+  if (currentStep === 1) headline = '正在展开抖音短链…';
+  if (currentStep === 2) headline = '正在识别这是视频还是创作者主页…';
+  if (currentStep >= 3) {
+    headline = creatorLikely
+      ? '正在抓取创作者主页与公开视频列表…'
+      : '正在准备创建处理任务…';
+  }
+
+  let footnote = creatorLikely
+    ? '这类“查看TA的更多作品”分享通常会先同步创作者主页，再跳转到来源页。'
+    : '单视频通常会很快入队；如果被识别为创作者主页，会额外同步公开视频列表。';
+  if (elapsedMs >= 12000) {
+    footnote = creatorLikely
+      ? '抖音侧响应偏慢，仍在抓取主页和公开视频列表；这个过程通常比单视频慢。'
+      : '仍在等待抖音返回结果；如果它最终被识别成创作者主页，会继续同步公开内容。';
+  }
+  if (elapsedMs >= 20000) {
+    footnote =
+      `如果持续超过 ${CREATOR_RESOLVE_TIMEOUT_SEC} 秒，系统会自动提示同步超时；通常是抖音响应较慢，或当前 Cookie 已失效。`;
+  }
+
+  return {
+    headline,
+    footnote,
+    isSlow: elapsedMs >= 12000,
+    elapsedLabel: formatResolveElapsed(elapsedMs),
+    steps: steps.map((step, idx) => ({
+      ...step,
+      state: idx < currentStep ? 'done' : idx === currentStep ? 'current' : 'pending',
+    })),
+  };
+}
+
+const RESOLVE_REQUEST_TIMEOUT_MS = 30_000;
+const CREATOR_RESOLVE_TIMEOUT_SEC = 25;
 
 const STAGE_LABELS = {
   download: '下载',
@@ -54,6 +155,8 @@ const STATUS_LABELS = {
 
 export function HomePage() {
   const [url, setUrl] = useState('');
+  const [resolveElapsedMs, setResolveElapsedMs] = useState(0);
+  const [resolveTarget, setResolveTarget] = useState('');
   const navigate = useNavigate();
   const qc = useQueryClient();
 
@@ -81,7 +184,25 @@ export function HomePage() {
   }, [creatorsPage]);
 
   const resolveLink = useMutation({
-    mutationFn: (u: string) => api.post<ResolveResult>('/api/resolve', { url: u }),
+    mutationFn: async (u: string) => {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), RESOLVE_REQUEST_TIMEOUT_MS);
+      try {
+        return await api.post<ResolveResult>('/api/resolve', { url: u }, { signal: controller.signal });
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          throw new Error(
+            '解析等待超时，请稍后重试。通常是抖音响应较慢，或当前 Cookie 已失效。',
+          );
+        }
+        throw err;
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    },
+    onMutate: (submittedUrl) => {
+      setResolveTarget(submittedUrl);
+    },
     onSuccess: (res) => {
       setUrl('');
       if (res.kind === 'video') {
@@ -100,10 +221,28 @@ export function HomePage() {
         navigate(`/import/${res.creator_id}`);
       }
     },
+    onSettled: () => setResolveTarget(''),
     onError: (err: Error) => toast.error(err.message || '解析链接失败'),
   });
 
+  useEffect(() => {
+    if (!resolveLink.isPending) {
+      setResolveElapsedMs(0);
+      return undefined;
+    }
+    const startedAt = Date.now();
+    setResolveElapsedMs(0);
+    const timer = window.setInterval(() => {
+      setResolveElapsedMs(Date.now() - startedAt);
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [resolveLink.isPending]);
+
   const disabled = !looksValid || resolveLink.isPending;
+  const resolveProgress = useMemo(
+    () => buildResolveProgress(resolveTarget || url, resolveElapsedMs),
+    [resolveElapsedMs, resolveTarget, url],
+  );
 
   const handleSubmit = () => {
     if (disabled) return;
@@ -159,7 +298,7 @@ export function HomePage() {
           leading={<Icon name="download" size={18} />}
           trailing={
             <Button variant="primary" disabled={disabled} onClick={handleSubmit}>
-              提交 <Icon name="arrow-right" size={12} />
+              {resolveLink.isPending ? '解析中' : '提交'} <Icon name="arrow-right" size={12} />
             </Button>
           }
         />
@@ -169,9 +308,40 @@ export function HomePage() {
           {url.trim() && !looksValid
             ? '当前支持抖音公开视频或创作者主页链接(v.douyin.com / douyin.com/video/... / douyin.com/user/...)'
             : resolveLink.isPending
-            ? '解析中…'
+            ? '解析进行中；下面会显示当前阶段和慢请求提示。'
             : '支持直接粘贴整段抖音分享文案；公开视频链接 → 直接入队；创作者主页短链 → 同步公开内容后进入来源页'}
         </div>
+        {resolveLink.isPending ? (
+          <div className={s.resolvePanel} role="status" aria-live="polite">
+            <div className={s.resolvePanelHead}>
+              <span>{resolveProgress.headline}</span>
+              <span>{resolveProgress.elapsedLabel}</span>
+            </div>
+            <div className={s.resolveSteps}>
+              {resolveProgress.steps.map((step) => (
+                <div
+                  key={step.label}
+                  className={[
+                    s.resolveStep,
+                    step.state === 'done' ? s.resolveStepDone : '',
+                    step.state === 'current' ? s.resolveStepCurrent : '',
+                  ].join(' ')}
+                >
+                  <span className={s.resolveStepBadge}>
+                    <Icon name={step.state === 'done' ? 'check' : step.icon} size={12} />
+                  </span>
+                  <span className={s.resolveStepCopy}>
+                    <strong>{step.label}</strong>
+                    <small>{step.detail}</small>
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className={[s.resolveFootnote, resolveProgress.isSlow ? s.resolveFootnoteSlow : ''].join(' ')}>
+              {resolveProgress.footnote}
+            </div>
+          </div>
+        ) : null}
       </section>
 
       <section className={s.section}>

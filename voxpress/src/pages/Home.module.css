@@ -12,6 +12,93 @@
 .errorHint {
   color: var(--vp-danger);
 }
+.resolvePanel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid rgba(132, 153, 176, 0.28);
+  border-radius: calc(var(--vp-radius) + 2px);
+  background:
+    linear-gradient(180deg, rgba(246, 248, 251, 0.98), rgba(255, 255, 255, 0.98));
+}
+.resolvePanelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: var(--vp-font-mono);
+  font-size: 11px;
+  color: var(--vp-ink-2);
+}
+.resolveSteps {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.resolveStep {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(214, 220, 228, 0.9);
+  background: rgba(255, 255, 255, 0.72);
+  opacity: 0.72;
+}
+.resolveStepDone,
+.resolveStepCurrent {
+  opacity: 1;
+}
+.resolveStepCurrent {
+  border-color: rgba(90, 122, 154, 0.48);
+  background: rgba(239, 244, 249, 0.96);
+}
+.resolveStepBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: rgba(42, 58, 78, 0.08);
+  color: var(--vp-ink-2);
+  flex: 0 0 auto;
+}
+.resolveStepDone .resolveStepBadge {
+  background: rgba(112, 150, 116, 0.14);
+  color: #3a6b40;
+}
+.resolveStepCurrent .resolveStepBadge {
+  background: rgba(90, 122, 154, 0.18);
+  color: #36506d;
+}
+.resolveStepCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.resolveStepCopy strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vp-ink);
+}
+.resolveStepCopy small {
+  font-family: var(--vp-font-mono);
+  font-size: 10.5px;
+  color: var(--vp-ink-3);
+  line-height: 1.45;
+}
+.resolveFootnote {
+  font-family: var(--vp-font-mono);
+  font-size: 10.5px;
+  color: var(--vp-ink-3);
+  line-height: 1.5;
+}
+.resolveFootnoteSlow {
+  color: #7b5b1f;
+}
 
 .section { display: flex; flex-direction: column; gap: 14px; }
 .sectionHead {
@@ -235,6 +322,9 @@
 }
 
 @media (max-width: 900px) {
+  .resolveSteps {
+    grid-template-columns: 1fr;
+  }
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .taskHead {
     display: none;
@@ -256,6 +346,10 @@
 @media (max-width: 620px) {
   .grid { grid-template-columns: 1fr; }
   .sectionHead {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .resolvePanelHead {
     align-items: flex-start;
     flex-direction: column;
   }

@@ -11,7 +11,9 @@ Video flow: yt-dlp handles the download when the task runs.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
@@ -36,6 +38,11 @@ class ScrapeFailed(ApiError):
     code = "scrape_failed"
 
 
+class CreatorResolveTimeout(ApiError):
+    status_code = 504
+    code = "creator_resolve_timeout"
+
+
 router = APIRouter(prefix="/api", tags=["resolve"])
 logger = logging.getLogger(__name__)
 
@@ -44,13 +51,21 @@ logger = logging.getLogger(__name__)
 async def resolve_link(
     payload: ResolveIn, s: AsyncSession = Depends(get_session)
 ) -> dict:
+    started_at = time.perf_counter()
     url = normalize_douyin_input(payload.url)
     if not url:
         raise InvalidUrl("链接不能为空")
+    logger.info("resolve start url=%s", url)
     try:
         info = await resolve(url)
     except UnknownDouyinLink as e:
         raise InvalidUrl(str(e)) from e
+    logger.info(
+        "resolve classified kind=%s canonical_url=%s elapsed_ms=%d",
+        info.kind,
+        info.canonical_url,
+        int((time.perf_counter() - started_at) * 1000),
+    )
 
     if info.kind == "video":
         task = Task(source_url=info.canonical_url, trigger_kind="manual")
@@ -58,19 +73,46 @@ async def resolve_link(
         await s.commit()
         await s.refresh(task)
         await emit_task_create(task.id)
+        logger.info(
+            "resolve video queued task_id=%s elapsed_ms=%d",
+            task.id,
+            int((time.perf_counter() - started_at) * 1000),
+        )
         return {"kind": "video", "task_id": str(task.id)}
 
     # Creator: scrape via f2 (signs Douyin's web API with ms_token/a_bogus).
     assert info.external_id, "classifier should always produce sec_uid for creators"
     cookie = await _load_cookie_text(s)
+    logger.info(
+        "resolve creator scrape start sec_uid=%s max_videos=%d",
+        info.external_id,
+        settings.creator_import_max_videos,
+    )
     try:
-        scraped = await fetch_creator_page(
+        async with asyncio.timeout(settings.creator_resolve_timeout_sec):
+            scraped = await fetch_creator_page(
+                info.external_id,
+                cookie_text=cookie,
+                max_videos=settings.creator_import_max_videos,
+            )
+    except TimeoutError as e:
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        logger.warning(
+            "resolve creator timeout sec_uid=%s timeout_sec=%d elapsed_ms=%d",
             info.external_id,
-            cookie_text=cookie,
-            max_videos=settings.creator_import_max_videos,
+            settings.creator_resolve_timeout_sec,
+            elapsed_ms,
         )
+        raise CreatorResolveTimeout(
+            "创作者主页同步超时，请稍后重试。通常是抖音响应较慢，或当前 Cookie 已失效。",
+            detail={
+                "stage": "creator_scrape",
+                "timeout_sec": settings.creator_resolve_timeout_sec,
+            },
+        ) from e
     except ScrapeError as e:
-        raise ScrapeFailed(str(e)) from e
+        logger.warning("resolve creator failed sec_uid=%s error=%s", info.external_id, e)
+        raise ScrapeFailed(str(e), detail={"stage": "creator_scrape"}) from e
 
     backfill_run_id: str | None = None
     backfill_started = False
@@ -112,6 +154,13 @@ async def resolve_link(
             backfill_started = True
         except SystemJobAlreadyRunning:
             logger.info("creator backfill skipped: another run is already active")
+    logger.info(
+        "resolve creator synced creator_id=%s fetched_videos=%d stored_videos=%d elapsed_ms=%d",
+        creator.id,
+        len(scraped.videos),
+        int(stored_count or 0),
+        int((time.perf_counter() - started_at) * 1000),
+    )
     return {
         "kind": "creator",
         "creator_id": creator.id,
