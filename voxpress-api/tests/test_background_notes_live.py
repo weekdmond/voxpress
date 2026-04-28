@@ -8,6 +8,7 @@ import pytest
 
 from voxpress.config import settings
 from voxpress.pipeline.dashscope import DashScopeError, DashScopeLLM
+from voxpress.prompts import DEFAULT_BACKGROUND_NOTES_TEMPLATE
 from voxpress.runtime_settings import load_dashscope_runtime_settings
 
 
@@ -36,6 +37,7 @@ async def test_background_notes_live_regression() -> None:
             creator_hint=fixture["creator_hint"],
             article_title=fixture["title_hint"],
             article_summary="作者借美伊冲突讨论舆论战、影响力和商战打法。",
+            prompt_template=DEFAULT_BACKGROUND_NOTES_TEMPLATE,
         )
     except DashScopeError as exc:
         if "AllocationQuota.FreeTierOnly" in str(exc):

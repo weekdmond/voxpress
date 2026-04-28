@@ -8,6 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from voxpress.config import settings as app_settings
 from voxpress.db import session_scope
 from voxpress.models import SettingEntry
+from voxpress.prompts import (
+    DEFAULT_BACKGROUND_NOTES_TEMPLATE,
+    DEFAULT_ORGANIZER_TEMPLATE,
+    DEFAULT_PROMPT_VERSION,
+)
 
 
 def _clean_str(value: Any) -> str:
@@ -67,6 +72,13 @@ class OssRuntimeSettings:
         )
 
 
+@dataclass(slots=True)
+class PromptRuntimeSettings:
+    version: str
+    organizer_template: str
+    background_notes_template: str
+
+
 def build_dashscope_runtime_settings(
     value: Mapping[str, Any] | None,
 ) -> DashScopeRuntimeSettings:
@@ -92,6 +104,20 @@ def build_oss_runtime_settings(
             raw.get("access_key_secret"), app_settings.oss_access_key_secret
         ),
         sign_expires_sec=app_settings.oss_sign_expires_sec,
+    )
+
+
+def build_prompt_runtime_settings(
+    value: Mapping[str, Any] | None,
+) -> PromptRuntimeSettings:
+    raw = dict(value or {})
+    return PromptRuntimeSettings(
+        version=_coalesce_str(raw.get("version"), DEFAULT_PROMPT_VERSION),
+        organizer_template=_coalesce_str(raw.get("template"), DEFAULT_ORGANIZER_TEMPLATE),
+        background_notes_template=_coalesce_str(
+            raw.get("background_notes_template"),
+            DEFAULT_BACKGROUND_NOTES_TEMPLATE,
+        ),
     )
 
 
@@ -121,3 +147,10 @@ async def load_oss_runtime_settings(
     session: AsyncSession | None = None,
 ) -> OssRuntimeSettings:
     return build_oss_runtime_settings(await load_setting_value("oss", session=session))
+
+
+async def load_prompt_runtime_settings(
+    *,
+    session: AsyncSession | None = None,
+) -> PromptRuntimeSettings:
+    return build_prompt_runtime_settings(await load_setting_value("prompt", session=session))

@@ -93,6 +93,7 @@ class StubLLM(LLMBackend):
         creator_hint: str,
         article_title: str,
         article_summary: str,
+        prompt_template: str,
     ) -> dict | None:
         await asyncio.sleep(0.2)
         return {

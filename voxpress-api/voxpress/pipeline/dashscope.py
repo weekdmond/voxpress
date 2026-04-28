@@ -174,6 +174,7 @@ class DashScopeLLM(LLMBackend):
         creator_hint: str,
         article_title: str,
         article_summary: str,
+        prompt_template: str,
     ) -> dict[str, Any] | None:
         user = (
             f"视频平台标题:{title_hint}\n"
@@ -186,7 +187,7 @@ class DashScopeLLM(LLMBackend):
         )
         result = await self.client.chat_json_result(
             model=self.model,
-            system=DEFAULT_BACKGROUND_NOTES_TEMPLATE,
+            system=prompt_template or DEFAULT_BACKGROUND_NOTES_TEMPLATE,
             user=user,
             temperature=0.1,
             timeout_sec=180.0,

@@ -11,8 +11,12 @@ from voxpress.errors import CookieInvalid, CookieMissing, InvalidCookieFile
 from voxpress.creator_sync import fetch_creator_page
 from voxpress.models import Creator, SettingEntry, Video
 from voxpress.pipeline.douyin_video import probe_video_access
-from voxpress.prompts import DEFAULT_CORRECTOR_TEMPLATE, DEFAULT_ORGANIZER_TEMPLATE, DEFAULT_PROMPT_VERSION
-from voxpress.runtime_settings import build_dashscope_runtime_settings, build_oss_runtime_settings
+from voxpress.prompts import DEFAULT_CORRECTOR_TEMPLATE
+from voxpress.runtime_settings import (
+    build_dashscope_runtime_settings,
+    build_oss_runtime_settings,
+    build_prompt_runtime_settings,
+)
 from voxpress.schemas import (
     ArticleSettings,
     CookieSettings,
@@ -57,7 +61,7 @@ _DEFAULTS: SettingsOut = SettingsOut(
     whisper=WhisperSettings(),
     corrector=CorrectorSettings(template=DEFAULT_CORRECTOR_TEMPLATE),
     article=ArticleSettings(),
-    prompt=PromptSettings(version=DEFAULT_PROMPT_VERSION, template=DEFAULT_ORGANIZER_TEMPLATE),
+    prompt=PromptSettings(),
     cookie=CookieSettings(),
     dashscope=DashScopeSettingsOut(),
     oss=OssSettingsOut(),
@@ -224,6 +228,10 @@ def _normalize_settings_dict(data: dict) -> dict:
     normalized["article"] = article
 
     prompt = {**_DEFAULTS.prompt.model_dump(), **dict(normalized.get("prompt") or {})}
+    prompt_runtime = build_prompt_runtime_settings(prompt)
+    prompt["version"] = prompt_runtime.version
+    prompt["template"] = prompt_runtime.organizer_template
+    prompt["background_notes_template"] = prompt_runtime.background_notes_template
     normalized["prompt"] = prompt
 
     cookie = {**_DEFAULTS.cookie.model_dump(mode="json"), **dict(normalized.get("cookie") or {})}
@@ -256,6 +264,13 @@ def _prepare_settings_value_for_storage(key: str, value: dict) -> dict:
     if key == "oss":
         allowed = ("region", "endpoint", "bucket", "access_key_id", "access_key_secret")
         return {field: raw[field] for field in allowed if field in raw}
+    if key == "prompt":
+        runtime = build_prompt_runtime_settings(raw)
+        return {
+            "version": runtime.version,
+            "template": runtime.organizer_template,
+            "background_notes_template": runtime.background_notes_template,
+        }
     return raw
 
 

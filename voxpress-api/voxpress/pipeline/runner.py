@@ -18,6 +18,7 @@ from voxpress.models import Article, Creator, SettingEntry, Task, Transcript, Tr
 from voxpress.pipeline.dashscope import DashScopeCorrector
 from voxpress.pipeline.protocols import Extractor, ExtractorResult, LLMBackend, Transcriber, TranscriptResult
 from voxpress.pipeline.stub import StubExtractor, StubLLM, StubTranscriber
+from voxpress.runtime_settings import load_prompt_runtime_settings
 
 logger = logging.getLogger(__name__)
 
@@ -330,8 +331,7 @@ class TaskRunner:
 
     async def organize_stage(self, task_id: UUID) -> dict[str, Any]:
         llm = await self._llm_backend()
-        settings_row = await self._load_settings_entry("prompt")
-        prompt_template = (settings_row or {}).get("template", "")
+        prompt_settings = await load_prompt_runtime_settings()
         ctx = await self._load_video_context(task_id)
         transcript = await self._load_transcript(ctx.video.id)
         transcript_text = (transcript.corrected_text or transcript.raw_text).strip()
@@ -341,7 +341,7 @@ class TaskRunner:
             transcript=transcript_text,
             title_hint=ctx.video.title,
             creator_hint=ctx.creator.name,
-            prompt_template=prompt_template,
+            prompt_template=prompt_settings.organizer_template,
             duration_sec=ctx.video.duration_sec,
         )
         usage = organized.get("_usage")
@@ -353,6 +353,7 @@ class TaskRunner:
                     creator_hint=ctx.creator.name,
                     article_title=str(organized.get("title") or ctx.video.title),
                     article_summary=str(organized.get("summary") or ""),
+                    prompt_template=prompt_settings.background_notes_template,
                 )
                 if isinstance(background_notes, dict) and background_notes.get("_usage") and usage:
                     from voxpress.task_metrics import merge_usage

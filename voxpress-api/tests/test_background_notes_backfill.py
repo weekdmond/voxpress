@@ -5,7 +5,11 @@ from voxpress.jobs.rebackfill_background_notes import (
     _select_transcript_text,
     _sync_prompt_value,
 )
-from voxpress.prompts import DEFAULT_ORGANIZER_TEMPLATE, DEFAULT_PROMPT_VERSION
+from voxpress.prompts import (
+    DEFAULT_BACKGROUND_NOTES_TEMPLATE,
+    DEFAULT_ORGANIZER_TEMPLATE,
+    DEFAULT_PROMPT_VERSION,
+)
 from voxpress.schemas import PromptSettings
 
 
@@ -36,6 +40,7 @@ def test_sync_prompt_value_fills_default_template_when_missing() -> None:
 
     assert synced["version"] == DEFAULT_PROMPT_VERSION
     assert synced["template"] == DEFAULT_ORGANIZER_TEMPLATE
+    assert synced["background_notes_template"] == DEFAULT_BACKGROUND_NOTES_TEMPLATE
 
 
 def test_prompt_settings_default_version_matches_prompt_constant() -> None:

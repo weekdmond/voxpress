@@ -16,7 +16,12 @@ from voxpress.db import session_scope
 from voxpress.models import Article, Creator, SettingEntry, Transcript, Video
 from voxpress.pipeline.dashscope import DashScopeLLM
 from voxpress.pipeline.runner import runner
-from voxpress.prompts import DEFAULT_ORGANIZER_TEMPLATE, DEFAULT_PROMPT_VERSION
+from voxpress.prompts import (
+    DEFAULT_BACKGROUND_NOTES_TEMPLATE,
+    DEFAULT_ORGANIZER_TEMPLATE,
+    DEFAULT_PROMPT_VERSION,
+)
+from voxpress.runtime_settings import load_prompt_runtime_settings
 
 
 @dataclass(slots=True)
@@ -78,6 +83,7 @@ def _sync_prompt_value(existing: dict[str, Any] | None) -> dict[str, Any]:
     value = dict(existing or {})
     value["version"] = DEFAULT_PROMPT_VERSION
     value.setdefault("template", DEFAULT_ORGANIZER_TEMPLATE)
+    value.setdefault("background_notes_template", DEFAULT_BACKGROUND_NOTES_TEMPLATE)
     return value
 
 
@@ -134,6 +140,7 @@ async def _rebuild_candidate(
     candidate: BackfillCandidate,
     *,
     llm: DashScopeLLM,
+    background_notes_template: str,
     semaphore: asyncio.Semaphore,
 ) -> BackfillResult:
     async with semaphore:
@@ -144,6 +151,7 @@ async def _rebuild_candidate(
                 creator_hint=candidate.creator_name,
                 article_title=candidate.article_title,
                 article_summary=candidate.article_summary,
+                prompt_template=background_notes_template,
             )
         except Exception as exc:  # noqa: BLE001
             return BackfillResult(candidate=candidate, new_background_notes=None, changed=False, error=str(exc))
@@ -254,9 +262,18 @@ async def _run(args: argparse.Namespace) -> int:
 
     candidates = await _load_candidates(since=_parse_since(args.since), limit=max(1, args.limit))
     llm = await _resolve_llm()
+    prompt_settings = await load_prompt_runtime_settings()
     semaphore = asyncio.Semaphore(max(1, args.concurrency))
     results = await asyncio.gather(
-        *[_rebuild_candidate(candidate, llm=llm, semaphore=semaphore) for candidate in candidates]
+        *[
+            _rebuild_candidate(
+                candidate,
+                llm=llm,
+                background_notes_template=prompt_settings.background_notes_template,
+                semaphore=semaphore,
+            )
+            for candidate in candidates
+        ]
     )
 
     if args.out:

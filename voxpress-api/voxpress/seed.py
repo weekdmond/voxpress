@@ -14,6 +14,11 @@ from sqlalchemy import delete, select
 
 from voxpress.db import session_scope
 from voxpress.models import Article, Creator, SettingEntry, Task, TranscriptSegment, Video
+from voxpress.prompts import (
+    DEFAULT_BACKGROUND_NOTES_TEMPLATE,
+    DEFAULT_ORGANIZER_TEMPLATE,
+    DEFAULT_PROMPT_VERSION,
+)
 
 
 CREATORS = [
@@ -203,8 +208,9 @@ async def seed() -> None:
             SettingEntry(
                 key="prompt",
                 value={
-                    "version": "v1.0",
-                    "template": "你是一位严谨的中文编辑。把下面这段口播转写整理成一篇结构化的文章,保留原作者的语气。",
+                    "version": DEFAULT_PROMPT_VERSION,
+                    "template": DEFAULT_ORGANIZER_TEMPLATE,
+                    "background_notes_template": DEFAULT_BACKGROUND_NOTES_TEMPLATE,
                 },
             )
         )

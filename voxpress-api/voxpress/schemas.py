@@ -7,7 +7,11 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from voxpress.config import settings as app_settings
-from voxpress.prompts import DEFAULT_PROMPT_VERSION
+from voxpress.prompts import (
+    DEFAULT_BACKGROUND_NOTES_TEMPLATE,
+    DEFAULT_ORGANIZER_TEMPLATE,
+    DEFAULT_PROMPT_VERSION,
+)
 
 # ─── Shared ─────────────────────────────────────────
 
@@ -426,7 +430,14 @@ class ArticleSettings(BaseModel):
 
 class PromptSettings(BaseModel):
     version: str = DEFAULT_PROMPT_VERSION
-    template: str = ""
+    template: str = DEFAULT_ORGANIZER_TEMPLATE
+    background_notes_template: str = DEFAULT_BACKGROUND_NOTES_TEMPLATE
+
+
+class PromptSettingsPatch(BaseModel):
+    version: str | None = None
+    template: str | None = None
+    background_notes_template: str | None = None
 
 
 class CookieSettings(BaseModel):
@@ -482,7 +493,7 @@ class SettingsPatch(BaseModel):
     whisper: WhisperSettings | None = None
     corrector: CorrectorSettings | None = None
     article: ArticleSettings | None = None
-    prompt: PromptSettings | None = None
+    prompt: PromptSettingsPatch | None = None
     cookie: CookieSettings | None = None
     dashscope: DashScopeSettingsPatch | None = None
     oss: OssSettingsPatch | None = None

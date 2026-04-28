@@ -5,7 +5,9 @@ from voxpress.routers.settings import (
     _prepare_settings_value_for_storage,
 )
 from voxpress.pipeline.runner import _normalize_runtime_settings
-from voxpress.schemas import SettingsOut
+from voxpress.prompts import DEFAULT_BACKGROUND_NOTES_TEMPLATE, DEFAULT_ORGANIZER_TEMPLATE, DEFAULT_PROMPT_VERSION
+from voxpress.runtime_settings import build_prompt_runtime_settings
+from voxpress.schemas import SettingsOut, SettingsPatch
 
 
 def test_normalize_settings_dict_exposes_configured_flags_without_leaking_secrets() -> None:
@@ -45,6 +47,10 @@ def test_normalize_settings_dict_exposes_configured_flags_without_leaking_secret
 
     assert dumped["cookie"]["status"] == "ok"
     assert "text" not in dumped["cookie"]
+
+    assert dumped["prompt"]["version"] == DEFAULT_PROMPT_VERSION
+    assert dumped["prompt"]["template"] == DEFAULT_ORGANIZER_TEMPLATE.strip()
+    assert dumped["prompt"]["background_notes_template"] == DEFAULT_BACKGROUND_NOTES_TEMPLATE.strip()
 
 
 def test_prepare_settings_value_for_storage_strips_derived_secret_status_fields() -> None:
@@ -97,3 +103,35 @@ def test_runner_normalize_runtime_settings_preserves_custom_model_names() -> Non
     assert _normalize_runtime_settings("llm", {"model": "custom-llm-model"})["model"] == "custom-llm-model"
     assert _normalize_runtime_settings("whisper", {"model": "custom-asr-model"})["model"] == "custom-asr-model"
     assert _normalize_runtime_settings("corrector", {"model": "custom-corrector-model"})["model"] == "custom-corrector-model"
+
+
+def test_prepare_prompt_settings_value_for_storage_normalizes_empty_templates() -> None:
+    assert _prepare_settings_value_for_storage("prompt", {"template": "", "version": ""}) == {
+        "version": DEFAULT_PROMPT_VERSION,
+        "template": DEFAULT_ORGANIZER_TEMPLATE.strip(),
+        "background_notes_template": DEFAULT_BACKGROUND_NOTES_TEMPLATE.strip(),
+    }
+
+
+def test_build_prompt_runtime_settings_preserves_custom_templates() -> None:
+    runtime = build_prompt_runtime_settings(
+        {
+            "version": "custom-v1",
+            "template": "custom organizer prompt",
+            "background_notes_template": "custom background prompt",
+        }
+    )
+
+    assert runtime.version == "custom-v1"
+    assert runtime.organizer_template == "custom organizer prompt"
+    assert runtime.background_notes_template == "custom background prompt"
+
+
+def test_prompt_settings_patch_keeps_partial_payload_partial() -> None:
+    patch = SettingsPatch.model_validate(
+        {"prompt": {"background_notes_template": "custom background prompt"}}
+    )
+
+    assert patch.model_dump(exclude_none=True, mode="json") == {
+        "prompt": {"background_notes_template": "custom background prompt"}
+    }

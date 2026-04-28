@@ -84,4 +84,5 @@ class LLMBackend(Protocol):
         creator_hint: str,
         article_title: str,
         article_summary: str,
+        prompt_template: str,
     ) -> dict | None: ...
