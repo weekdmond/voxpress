@@ -56,3 +56,12 @@
   font-family: var(--vp-font-mono);
   font-size: 11px;
 }
+
+@media (max-width: 860px) {
+  .panel {
+    left: 10px;
+    right: 10px;
+    bottom: calc(86px + env(safe-area-inset-bottom));
+    width: auto;
+  }
+}

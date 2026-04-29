@@ -345,8 +345,62 @@
 }
 
 @media (max-width: 780px) {
+  .reader {
+    min-height: 0;
+    border-radius: 18px;
+  }
+
+  .toolbar {
+    align-items: flex-start;
+    padding: 12px 14px;
+    flex-direction: column;
+  }
+
+  .toolbarLeft,
+  .toolbarRight {
+    width: 100%;
+  }
+
+  .toolbarRight {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .toolbarRight::-webkit-scrollbar {
+    display: none;
+  }
+
+  .body,
+  .split {
+    display: block;
+    min-height: 0;
+  }
+
   .article {
     padding: 28px 20px 40px;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .article h1 {
+    font-size: 27px;
+  }
+
+  .article p {
+    font-size: 15px;
+    line-height: 1.85;
+  }
+
+  .drawer {
+    max-height: none;
+    border-left: 0;
+    border-top: 1px solid var(--vp-line-2);
+  }
+
+  .drawerBody {
+    max-height: 70vh;
   }
 
   .drawerModeBar {
@@ -355,6 +409,38 @@
 }
 
 @media (max-width: 520px) {
+  .reader {
+    margin-inline: -2px;
+    border-radius: 16px;
+  }
+
+  .article {
+    padding: 24px 16px 36px;
+  }
+
+  .article h1 {
+    font-size: 24px;
+    margin-bottom: 14px;
+  }
+
+  .article h2 {
+    font-size: 18px;
+  }
+
+  .drawerHead,
+  .drawerBody {
+    padding-inline: 14px;
+  }
+
+  .seg {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .ts {
+    padding-top: 0;
+  }
+
   .sourceCard {
     gap: 6px 10px;
   }

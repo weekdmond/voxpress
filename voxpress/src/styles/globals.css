@@ -39,3 +39,14 @@ body.serif .reader-article li {
 }
 
 /* Toast positioning is handled by sonner */
+
+@media (max-width: 860px) {
+  html,
+  body {
+    overflow-x: hidden;
+  }
+
+  body {
+    -webkit-text-size-adjust: 100%;
+  }
+}

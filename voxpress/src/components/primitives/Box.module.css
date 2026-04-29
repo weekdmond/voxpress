@@ -34,3 +34,19 @@
   background: var(--vp-line-2);
   margin: 14px 0;
 }
+
+@media (max-width: 760px) {
+  .box {
+    border-radius: 16px;
+    padding: 14px;
+  }
+
+  .row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .rowBetween {
+    justify-content: flex-start;
+  }
+}

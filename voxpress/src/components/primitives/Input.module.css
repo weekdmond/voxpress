@@ -46,3 +46,9 @@
   color: var(--vp-ink-3);
   flex-shrink: 0;
 }
+
+@media (max-width: 760px) {
+  .wrap {
+    width: 100%;
+  }
+}

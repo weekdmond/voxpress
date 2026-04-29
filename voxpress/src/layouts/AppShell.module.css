@@ -40,3 +40,44 @@
   align-items: baseline;
   flex-wrap: wrap;
 }
+
+@media (max-width: 860px) {
+  .shell {
+    display: block;
+    min-height: 100dvh;
+  }
+
+  .main {
+    max-width: none;
+    padding: 18px 14px calc(96px + env(safe-area-inset-bottom));
+  }
+
+  .page {
+    gap: 16px;
+  }
+
+  .pageHead {
+    gap: 8px;
+    padding-bottom: 12px;
+  }
+
+  .pageTitle {
+    width: 100%;
+    font-size: 23px;
+  }
+
+  .pageMeta {
+    gap: 8px;
+    font-size: 10.5px;
+  }
+}
+
+@media (max-width: 480px) {
+  .main {
+    padding-inline: 10px;
+  }
+
+  .pageTitle {
+    font-size: 22px;
+  }
+}

@@ -270,12 +270,27 @@
 }
 
 @media (max-width: 640px) {
+  .dialog {
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: 0;
+    width: 100%;
+    max-height: 88dvh;
+    transform: none;
+    border-radius: 22px 22px 0 0;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+  }
+
   .header {
     padding: 14px 14px 8px;
+    align-items: flex-start;
   }
 
   .body {
-    padding: 10px 14px 16px;
+    padding: 10px 14px calc(16px + env(safe-area-inset-bottom));
   }
 
   .tabs {
@@ -285,5 +300,22 @@
   .tabs button {
     flex: 1;
     padding: 0 10px;
+  }
+
+  .terminal pre {
+    max-height: 34vh;
+    padding: 14px;
+    font-size: 12px;
+  }
+
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .download,
+  .actions button {
+    width: 100%;
+    justify-content: center;
   }
 }
