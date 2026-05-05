@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import type { Creator, Health, Page } from '@/types/api';
 import type { IconName } from '@/components/primitives';
+import { SpeechFolioMark } from '@/components/Brand/SpeechFolioMark';
 import s from './Sidebar.module.css';
 import { useSseStatus } from '@/features/tasks/useSseStatus';
 
@@ -53,9 +54,14 @@ export function Sidebar() {
   return (
     <aside className={s.sidebar}>
       <div className={s.brand}>
-        <div className={s.brandMark}>S</div>
+        <div className={s.brandMark}>
+          <SpeechFolioMark className={s.brandMarkIcon} aria-hidden="true" />
+        </div>
         <div>
-          <div className={s.brandName}>SpeechFolio</div>
+          <div className={s.brandName}>
+            <span>Speech</span>
+            <span className={s.brandAccent}>Folio</span>
+          </div>
         </div>
         <div className={s.brandVersion}>v0.4</div>
       </div>
