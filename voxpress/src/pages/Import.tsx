@@ -358,69 +358,66 @@ export function ImportPage() {
       {/* Compact creator card */}
       {creator ? (
         <div className={s.creatorCard}>
-          <Avatar
-            size="lg"
-            id={creator.id}
-            initial={creator.initial}
-            src={creator.avatar_url}
-          />
-          <div className={s.creatorMain}>
-            <div className={s.titleRow}>
-              <span className={s.creatorName}>{creator.name}</span>
-              <DouyinBadge />
-              {creator.verified ? <span className={s.chip}>蓝V</span> : null}
-              <span className={[s.chip, s.chipOk].join(' ')}>已转 {organizedCount}</span>
-              {pendingCount > 0 ? (
-                <span className={[s.chip, s.chipWarn].join(' ')}>
-                  待处理 {pendingCount.toLocaleString()}
-                </span>
-              ) : null}
-              {creator.external_id ? (
-                <a
-                  className={s.chipLink}
-                  href={`https://www.douyin.com/user/${creator.external_id}`}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  title="在抖音打开创作者主页"
+          <div className={s.creatorIdentity}>
+            <Avatar
+              size="lg"
+              id={creator.id}
+              initial={creator.initial}
+              src={creator.avatar_url}
+            />
+            <div className={s.creatorMain}>
+              <div className={s.titleRow}>
+                <span className={s.creatorName}>{creator.name}</span>
+                <DouyinBadge />
+                {creator.verified ? <span className={s.chip}>蓝V</span> : null}
+                <span className={[s.chip, s.chipOk].join(' ')}>已转 {organizedCount}</span>
+                {pendingCount > 0 ? (
+                  <span className={[s.chip, s.chipWarn].join(' ')}>
+                    待处理 {pendingCount.toLocaleString()}
+                  </span>
+                ) : null}
+                {creator.external_id ? (
+                  <a
+                    className={s.chipLink}
+                    href={`https://www.douyin.com/user/${creator.external_id}`}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    title="在抖音打开创作者主页"
+                  >
+                    <Icon name="external" size={11} />
+                    在抖音查看
+                  </a>
+                ) : null}
+                <button
+                  className={s.chipButton}
+                  disabled={backfillMut.isPending}
+                  onClick={() => backfillMut.mutate()}
+                  title="后台补齐这个来源尚未入库的作品"
                 >
-                  <Icon name="external" size={11} />
-                  在抖音查看
-                </a>
-              ) : null}
-              <button
-                className={s.chipButton}
-                disabled={backfillMut.isPending}
-                onClick={() => backfillMut.mutate()}
-                title="后台补齐这个来源尚未入库的作品"
-              >
-                <Icon name="refresh" size={11} />
-                {backfillMut.isPending
-                  ? '启动中'
-                  : backfillMissingCount > 0
-                    ? `补齐作品 ${formatCount(backfillMissingCount)}`
-                    : '重新补齐'}
-              </button>
-            </div>
-            <div className={s.creatorMeta}>
-              <span>{creator.handle}</span>
-              {creator.region ? (
-                <>
-                  <span className={s.creatorMetaSep}>·</span>
-                  <span>IP 属地 · {creator.region}</span>
-                </>
-              ) : null}
-              {creator.recent_update_at ? (
-                <>
-                  <span className={s.creatorMetaSep}>·</span>
-                  <span>最近更新 {formatDate(creator.recent_update_at)}</span>
-                </>
-              ) : null}
-              {creator.bio ? (
-                <>
-                  <span className={s.creatorMetaSep}>·</span>
-                  <span>{creator.bio}</span>
-                </>
-              ) : null}
+                  <Icon name="refresh" size={11} />
+                  {backfillMut.isPending
+                    ? '启动中'
+                    : backfillMissingCount > 0
+                      ? `补齐作品 ${formatCount(backfillMissingCount)}`
+                      : '重新补齐'}
+                </button>
+              </div>
+              <div className={s.creatorMeta}>
+                <span>{creator.handle}</span>
+                {creator.region ? (
+                  <>
+                    <span className={s.creatorMetaSep}>·</span>
+                    <span>IP 属地 · {creator.region}</span>
+                  </>
+                ) : null}
+                {creator.recent_update_at ? (
+                  <>
+                    <span className={s.creatorMetaSep}>·</span>
+                    <span>最近更新 {formatDate(creator.recent_update_at)}</span>
+                  </>
+                ) : null}
+              </div>
+              {creator.bio ? <div className={s.creatorBio}>{creator.bio}</div> : null}
             </div>
           </div>
           <div className={s.creatorStats}>

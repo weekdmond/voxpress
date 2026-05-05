@@ -203,24 +203,30 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 0 2px 14px;
+  padding: 8px 10px;
+  margin-bottom: 14px;
+  border: 1px solid rgba(34, 211, 238, 0.22);
+  border-radius: var(--vp-radius-lg);
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.1), rgba(255, 255, 255, 0.72));
   font-size: 12px;
 }
 .activeLbl {
   font-family: var(--vp-font-mono);
   font-size: 11px;
-  color: var(--vp-ink-3);
+  color: var(--vp-accent-2);
+  font-weight: 600;
 }
 .activePill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 3px 4px 3px 10px;
-  background: var(--vp-accent-soft);
-  border: 1px solid var(--vp-accent-tint);
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(34, 211, 238, 0.42);
   border-radius: var(--vp-radius-full);
   font-size: 11.5px;
   color: var(--vp-accent-2);
+  box-shadow: 0 1px 0 rgba(34, 211, 238, 0.12);
   white-space: nowrap;
 }
 .activePill button {
@@ -237,11 +243,11 @@
   line-height: 1;
 }
 .activePill button:hover {
-  background: var(--vp-panel);
-  color: var(--vp-ink);
+  background: var(--vp-accent-soft);
+  color: var(--vp-accent-2);
 }
 .activeClear {
-  color: var(--vp-ink-3);
+  color: var(--vp-accent-2);
   cursor: pointer;
   font-size: 11.5px;
   text-decoration: underline;

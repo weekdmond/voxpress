@@ -51,19 +51,28 @@ export interface TaskChainBarProps {
 }
 
 export function TaskChainBar({ stage, status, compact }: TaskChainBarProps) {
+  const currentIndex = STAGE_ORDER.indexOf(stage);
   return (
     <div className={[s.bar, compact ? s.compact : ''].filter(Boolean).join(' ')}>
       {STAGE_ORDER.map((st, i) => {
         const stepStatus = statusFor(st, stage, status);
+        const linkDone = i > 0 && status !== 'queued' && (status === 'done' || i <= currentIndex);
         return (
-          <div key={st} style={{ display: 'inline-flex', alignItems: 'center' }}>
+          <div
+            key={st}
+            className={[
+              s.stepWrap,
+              linkDone ? s.linkDone : '',
+              s[`wrap_${stepStatus}`],
+            ].join(' ')}
+          >
             <span
               className={[s.step, s[stepStatus]].join(' ')}
               title={`${STAGE_LABEL[st]} · ${stepStatus}`}
             >
               <Icon name={STAGE_ICON[st]} size={compact ? 11 : 13} />
             </span>
-            {i < STAGE_ORDER.length - 1 ? <span className={s.sep} /> : null}
+            {!compact ? <span className={s.label}>{STAGE_LABEL[st]}</span> : null}
           </div>
         );
       })}

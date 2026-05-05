@@ -34,21 +34,27 @@
   background: var(--vp-panel);
   border: 1px solid var(--vp-line);
   border-radius: var(--vp-radius-lg);
-  padding: 14px 18px;
-  display: flex;
+  padding: 16px 18px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
   align-items: center;
   gap: 16px;
   box-shadow: var(--vp-shadow-sm);
   margin-bottom: 14px;
-  flex-wrap: wrap;
+}
+
+.creatorIdentity {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
 }
 
 .creatorMain {
-  flex: 1 1 300px;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .titleRow {
@@ -90,26 +96,44 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 100%;
+  max-width: 240px;
 }
 .creatorMetaSep {
   color: var(--vp-ink-4);
 }
+.creatorBio {
+  color: var(--vp-ink-2);
+  font-size: 12.5px;
+  line-height: 1.55;
+  max-width: 100%;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 
 .creatorStats {
-  display: flex;
-  align-items: center;
-  gap: 20px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--vp-line-2);
+  border-radius: var(--vp-radius-md);
+  background: var(--vp-line-2);
   padding-left: 16px;
-  border-left: 1px solid var(--vp-line-2);
-  flex-shrink: 0;
-  flex-wrap: wrap;
+  padding-left: 0;
+  min-width: 0;
 }
 .creatorStat {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  justify-content: center;
+  gap: 3px;
   align-items: flex-start;
+  min-width: 0;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, #fff, rgba(245, 247, 250, 0.86));
 }
 .creatorStat b {
   font-family: var(--vp-font-mono);
@@ -128,17 +152,15 @@
 }
 
 @media (max-width: 1200px) {
+  .creatorCard {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
   .creatorStats {
-    padding-left: 0;
-    border-left: 0;
-    padding-top: 10px;
-    border-top: 1px solid var(--vp-line-2);
     width: 100%;
     gap: 0;
   }
   .creatorStat {
-    flex: 1 1 calc(25% - 4px);
-    min-width: 0;
     padding-right: 12px;
   }
 }
@@ -162,12 +184,12 @@
 .chipOk {
   background: var(--vp-ok-soft);
   color: var(--vp-ok);
-  border-color: #cfe0d2;
+  border-color: rgba(16, 185, 129, 0.24);
 }
 .chipWarn {
   background: var(--vp-warn-soft);
   color: var(--vp-warn);
-  border-color: #ecd9b3;
+  border-color: rgba(245, 158, 11, 0.24);
 }
 .chipLink {
   display: inline-flex;
@@ -418,13 +440,15 @@
   color: var(--vp-ink);
 }
 .btnPrimary {
-  background: var(--vp-accent-2);
-  border-color: var(--vp-accent-2);
-  color: #fff;
-  box-shadow: var(--vp-shadow-sm);
+  background: linear-gradient(135deg, var(--vp-accent) 0%, #67e8f9 100%);
+  border-color: var(--vp-accent);
+  color: var(--vp-accent-contrast);
+  box-shadow: 0 9px 20px rgba(34, 211, 238, 0.2);
+  font-weight: 600;
 }
 .btnPrimary:hover:not(:disabled) {
-  background: #1a222e;
+  background: var(--vp-accent-2);
+  color: #fff;
 }
 .btnPrimary:disabled {
   opacity: 0.5;
@@ -437,21 +461,26 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 0 2px 14px;
+  padding: 8px 10px;
+  margin-bottom: 14px;
+  border: 1px solid rgba(34, 211, 238, 0.22);
+  border-radius: var(--vp-radius-lg);
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.1), rgba(255, 255, 255, 0.72));
   font-size: 12px;
 }
 .activeLbl {
   font-family: var(--vp-font-mono);
   font-size: 11px;
-  color: var(--vp-ink-3);
+  color: var(--vp-accent-2);
+  font-weight: 600;
 }
 .activePill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 3px 4px 3px 10px;
-  background: var(--vp-accent-soft);
-  border: 1px solid var(--vp-accent-tint);
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(34, 211, 238, 0.42);
   border-radius: var(--vp-radius-full);
   font-size: 11.5px;
   color: var(--vp-accent-2);
@@ -470,11 +499,11 @@
   line-height: 1;
 }
 .activePill button:hover {
-  background: var(--vp-panel);
-  color: var(--vp-ink);
+  background: var(--vp-accent-soft);
+  color: var(--vp-accent-2);
 }
 .activeClear {
-  color: var(--vp-ink-3);
+  color: var(--vp-accent-2);
   cursor: pointer;
   font-size: 11.5px;
   text-decoration: underline;

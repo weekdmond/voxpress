@@ -32,9 +32,10 @@
 }
 
 .scopeTabOn {
-  background: var(--vp-accent-2);
-  color: #fff;
-  box-shadow: var(--vp-shadow-sm);
+  background: var(--vp-accent-soft);
+  color: var(--vp-accent-2);
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.28), var(--vp-shadow-sm);
+  font-weight: 600;
 }
 
 /* ─── Stats bar ────────────────────────────────────── */
@@ -134,8 +135,8 @@
 }
 .tabOn {
   background: var(--vp-panel);
-  color: var(--vp-ink);
-  box-shadow: var(--vp-shadow-sm);
+  color: var(--vp-accent-2);
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.18), var(--vp-shadow-sm);
   font-weight: 500;
 }
 .tabCount {
@@ -341,7 +342,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  background: var(--vp-accent-2);
+  background: linear-gradient(135deg, var(--vp-accent-2), #0e7490);
   color: #fff;
   border-radius: var(--vp-radius-lg);
   padding: 10px 16px;
@@ -473,20 +474,20 @@
 }
 .stDotDone {
   background: var(--vp-ok);
-  box-shadow: 0 0 0 2px rgba(74, 124, 89, 0.18);
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.18);
 }
 .stDotRunning {
-  background: #3c6495;
-  box-shadow: 0 0 0 2px rgba(60, 100, 149, 0.18);
+  background: var(--vp-running);
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.2);
   animation: vp-pulse 1.2s infinite;
 }
 .stDotFailed {
-  background: #a84040;
-  box-shadow: 0 0 0 2px rgba(168, 64, 64, 0.18);
+  background: var(--vp-danger);
+  box-shadow: 0 0 0 2px rgba(244, 63, 94, 0.18);
 }
 .stDotQueued {
   background: var(--vp-warn);
-  box-shadow: 0 0 0 2px rgba(156, 111, 30, 0.18);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.18);
 }
 .stDotCanceled {
   background: var(--vp-ink-4);
@@ -554,7 +555,7 @@
 .sysError {
   font-family: var(--vp-font-mono);
   font-size: 10.5px;
-  color: #a84040;
+  color: var(--vp-danger);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

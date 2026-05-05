@@ -286,22 +286,29 @@ export function HomePage() {
       />
 
       <section className={s.submit}>
-        <Input
-          size="lg"
-          mono
-          placeholder="导入你的视频、音频、字幕或公共链接 · 回车提交"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleSubmit();
-          }}
-          leading={<Icon name="download" size={18} />}
-          trailing={
-            <Button variant="primary" disabled={disabled} onClick={handleSubmit}>
-              {resolveLink.isPending ? '解析中' : '提交'} <Icon name="arrow-right" size={12} />
-            </Button>
-          }
-        />
+        <div className={s.submitBar}>
+          <Input
+            size="lg"
+            mono
+            wrapClassName={s.submitInput}
+            placeholder="导入你的视频、音频、字幕或公共链接 · 回车提交"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleSubmit();
+            }}
+            leading={<Icon name="download" size={18} />}
+          />
+          <Button
+            className={s.submitButton}
+            variant="primary"
+            disabled={disabled}
+            onClick={handleSubmit}
+          >
+            {resolveLink.isPending ? '解析中' : '提交'}
+            <Icon name="arrow-right" size={13} />
+          </Button>
+        </div>
         <div
           className={[s.hint, url.trim() && !looksValid ? s.errorHint : ''].join(' ')}
         >

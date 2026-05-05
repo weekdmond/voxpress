@@ -38,13 +38,15 @@
 .md { padding: 7px 13px; font-size: 12.5px; }
 
 .primary {
-  background: var(--vp-accent-2);
-  border-color: var(--vp-accent-2);
-  color: #fff;
+  background: linear-gradient(135deg, var(--vp-accent) 0%, #67e8f9 100%);
+  border-color: var(--vp-accent);
+  color: var(--vp-accent-contrast);
+  font-weight: 600;
+  box-shadow: 0 9px 20px rgba(34, 211, 238, 0.22);
 }
 .primary:hover {
-  background: #1a222e;
-  border-color: #1a222e;
+  background: var(--vp-accent-2);
+  border-color: var(--vp-accent-2);
   color: #fff;
 }
 

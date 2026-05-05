@@ -109,9 +109,25 @@
   gap: 8px;
   flex-wrap: wrap;
 }
+.drawerKicker {
+  font-family: var(--vp-font-mono);
+  font-size: 10.5px;
+  color: var(--vp-ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
 .drawerModeBar {
   display: flex;
-  gap: 8px;
+  width: fit-content;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--vp-line);
+  border-radius: var(--vp-radius-lg);
+  background: var(--vp-bg-2);
+}
+.drawerModeBar button {
+  box-shadow: none;
+  border-color: transparent;
 }
 .drawerMetaStack {
   display: flex;

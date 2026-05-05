@@ -23,10 +23,11 @@
   color: var(--vp-ok);
 }
 .current {
-  background: var(--vp-accent-2);
-  color: #fff;
+  background: var(--vp-running-soft);
+  color: var(--vp-accent-2);
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.32);
 }
 .failed {
-  background: #fae3e3;
+  background: var(--vp-danger-soft);
   color: var(--vp-danger);
 }

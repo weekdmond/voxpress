@@ -1,45 +1,48 @@
-/* VoxPress Design Tokens · v3
- * Copy to: src/styles/tokens.css
- * Source: VoxPress v3 (高保真).html
+/* SpeechFolio Design Tokens · UI Review v1
+ * P0 refresh: cyan primary, tabular numeric tone, 4-color status system.
  */
 
 :root {
   /* ─────────── Backgrounds & Surfaces ─────────── */
-  --vp-bg:         #f4f5f7;  /* app background (cool slate) */
-  --vp-bg-2:       #eceef2;  /* secondary surface, hover fills */
+  --vp-bg:         #f5f7fa;  /* app background */
+  --vp-bg-2:       #eef2f7;  /* secondary surface, hover fills */
   --vp-panel:      #ffffff;  /* cards, sidebar, inputs */
 
   /* ─────────── Ink (text) ─────────── */
-  --vp-ink:        #0f1419;  /* primary text */
-  --vp-ink-2:      #3d4550;  /* secondary text */
-  --vp-ink-3:      #7b8594;  /* tertiary / placeholders / icons */
-  --vp-ink-4:      #b6bdc8;  /* disabled, dividers in text context */
+  --vp-ink:        #0f172a;  /* primary text */
+  --vp-ink-2:      #334155;  /* secondary text */
+  --vp-ink-3:      #64748b;  /* tertiary / placeholders / icons */
+  --vp-ink-4:      #cbd5e1;  /* disabled, dividers in text context */
 
   /* ─────────── Lines & Borders ─────────── */
-  --vp-line:        #e2e5eb; /* default border */
-  --vp-line-2:      #eef0f4; /* soft divider */
-  --vp-line-strong: #d0d5de; /* hover border */
+  --vp-line:        #e2e8f0; /* default border */
+  --vp-line-2:      #edf2f7; /* soft divider */
+  --vp-line-strong: #cbd5e1; /* hover border */
 
-  /* ─────────── Accent (cool slate blue) ─────────── */
-  --vp-accent:      #4f5d75;
-  --vp-accent-2:    #2d3748; /* primary buttons, active nav */
-  --vp-accent-soft: #eef1f6;
-  --vp-accent-tint: #dde3ec;
+  /* ─────────── Accent (SpeechFolio cyan) ─────────── */
+  --vp-accent:          #22d3ee;
+  --vp-accent-2:        #0891b2; /* readable cyan / active text */
+  --vp-accent-soft:     rgba(34, 211, 238, 0.12);
+  --vp-accent-tint:     #a5f3fc;
+  --vp-accent-contrast: #06212a;
 
   /* ─────────── Semantic ─────────── */
-  --vp-ok:        #4a7c59;
-  --vp-ok-soft:   #e8efe9;
-  --vp-warn:      #9c6f1e;
-  --vp-warn-soft: #f6efdf;
-  --vp-danger:    #9c4a4a;
+  --vp-ok:          #10b981;
+  --vp-ok-soft:     #d1fae5;
+  --vp-running:     #22d3ee;
+  --vp-running-soft: rgba(34, 211, 238, 0.14);
+  --vp-warn:        #f59e0b;
+  --vp-warn-soft:   #fef3c7;
+  --vp-danger:      #f43f5e;
+  --vp-danger-soft: #ffe4e6;
 
   /* ─────────── Gradients (deterministic) ─────────── */
-  --vp-hatch: linear-gradient(135deg, #e8ebf0 0%, #dde1e8 100%);
+  --vp-hatch: linear-gradient(135deg, #ecfeff 0%, #e0f2fe 100%);
 
   /* ─────────── Shadows ─────────── */
-  --vp-shadow-sm: 0 1px 2px rgba(15,20,25,0.04), 0 1px 1px rgba(15,20,25,0.02);
-  --vp-shadow-md: 0 2px 8px rgba(15,20,25,0.05), 0 1px 3px rgba(15,20,25,0.03);
-  --vp-shadow-lg: 0 12px 32px rgba(15,20,25,0.08), 0 2px 6px rgba(15,20,25,0.04);
+  --vp-shadow-sm: 0 1px 2px rgba(15,23,42,0.05), 0 1px 1px rgba(15,23,42,0.03);
+  --vp-shadow-md: 0 2px 8px rgba(15,23,42,0.06), 0 1px 3px rgba(15,23,42,0.04);
+  --vp-shadow-lg: 0 12px 32px rgba(15,23,42,0.09), 0 2px 6px rgba(15,23,42,0.05);
 
   /* ─────────── Radius ─────────── */
   --vp-radius-sm: 4px;
@@ -64,7 +67,7 @@
 
   /* ─────────── Type ─────────── */
   --vp-font-sans: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', sans-serif;
-  --vp-font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --vp-font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
   --vp-font-serif: 'Instrument Serif', 'Noto Serif SC', Georgia, serif;
 
   --vp-text-xs:   11px;

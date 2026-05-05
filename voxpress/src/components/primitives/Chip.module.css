@@ -35,14 +35,20 @@
 .warn {
   background: var(--vp-warn-soft);
   color: var(--vp-warn);
-  border-color: #ead8b5;
+  border-color: #fde68a;
+}
+
+.danger {
+  background: var(--vp-danger-soft);
+  color: var(--vp-danger);
+  border-color: #fecdd3;
 }
 
 .dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--vp-ok);
+  background: var(--vp-running);
   animation: vp-pulse 1.8s ease-in-out infinite;
 }
 

@@ -81,8 +81,8 @@
   gap: 12px;
 }
 .rerunBoxFailed {
-  border: 1px solid #f6d9d9;
-  background: #fdf5f5;
+  border: 1px solid #fecdd3;
+  background: var(--vp-danger-soft);
 }
 .rerunBoxSucceeded {
   border: 1px solid var(--vp-line);
@@ -97,8 +97,8 @@
   flex-shrink: 0;
 }
 .rerunIconFailed {
-  background: #f8e6e6;
-  color: #a84040;
+  background: rgba(244, 63, 94, 0.12);
+  color: var(--vp-danger);
 }
 .rerunIconSucceeded {
   background: var(--vp-accent-soft);
@@ -125,9 +125,9 @@
   gap: 6px;
   height: 30px;
   padding: 0 14px;
-  background: var(--vp-accent-2);
-  color: #fff;
-  border: 0;
+  background: linear-gradient(135deg, var(--vp-accent) 0%, #67e8f9 100%);
+  color: var(--vp-accent-contrast);
+  border: 1px solid var(--vp-accent);
   border-radius: var(--vp-radius);
   font-family: inherit;
   font-size: 12px;
@@ -137,7 +137,8 @@
   transition: all 120ms var(--vp-ease);
 }
 .rerunBtn:hover {
-  background: var(--vp-ink);
+  background: var(--vp-accent-2);
+  color: #fff;
 }
 .rerunBtnGhost {
   background: var(--vp-panel);
@@ -247,13 +248,13 @@
   background: var(--vp-line);
 }
 .dotPending {
-  background: var(--vp-ink-4);
+  background: var(--vp-warn);
 }
 .dotFailed {
-  background: #c95353;
+  background: var(--vp-danger);
 }
 .dotRunning {
-  background: #3c6495;
+  background: var(--vp-running);
   animation: vp-pulse 1.2s infinite;
 }
 
@@ -286,8 +287,8 @@
   color: var(--vp-accent-2);
 }
 .kindAsr {
-  background: #efe6ee;
-  color: #6b3e6e;
+  background: var(--vp-running-soft);
+  color: var(--vp-accent-2);
 }
 .kindNone {
   background: var(--vp-bg-2);

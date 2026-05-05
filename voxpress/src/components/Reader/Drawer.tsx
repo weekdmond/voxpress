@@ -21,13 +21,13 @@ interface DrawerProps {
 function correctionChip(status: CorrectionStatus) {
   switch (status) {
     case 'ok':
-      return <Chip variant="ok">纠错完成</Chip>;
+      return <Chip variant="ok">已完成</Chip>;
     case 'skipped':
       return <Chip>未启用纠错</Chip>;
     case 'failed':
-      return <Chip variant="warn">纠错失败 · 已降级原稿</Chip>;
+      return <Chip variant="danger">纠错失败 · 已降级原稿</Chip>;
     case 'pending':
-      return <Chip variant="warn">待纠错</Chip>;
+      return <Chip variant="warn">等待纠错</Chip>;
     default:
       return null;
   }
@@ -76,24 +76,24 @@ export function Drawer({
     <aside className={s.drawer}>
       <div className={s.drawerHead}>
         <div className={s.drawerHeadTop}>
-          <Chip variant="accent">{mode === 'corrected' ? '纠错后稿' : '原始逐字稿'}</Chip>
+          <span className={s.drawerKicker}>纠错状态</span>
           {correctionChip(correctionStatus)}
         </div>
-        <div className={s.drawerModeBar}>
+        <div className={s.drawerModeBar} role="tablist" aria-label="逐字稿版本">
           <Button
             size="sm"
             variant={mode === 'corrected' ? 'primary' : 'default'}
             onClick={() => setMode('corrected')}
             disabled={!correctedText?.trim()}
           >
-            纠错稿
+            纠错后稿
           </Button>
           <Button
             size="sm"
             variant={mode === 'raw' ? 'primary' : 'default'}
             onClick={() => setMode('raw')}
           >
-            原稿
+            原始稿
           </Button>
         </div>
         <div className={s.drawerMetaStack}>

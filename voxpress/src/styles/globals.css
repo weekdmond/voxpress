@@ -18,6 +18,13 @@ body.serif .reader-article li {
   font-variant-numeric: tabular-nums;
 }
 
+.num,
+.tabularNums {
+  font-family: var(--vp-font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
 /* Shimmer animation for progress and skeletons */
 @keyframes vp-shimmer {
   0% { transform: translateX(-100%); }
@@ -36,6 +43,11 @@ body.serif .reader-article li {
 /* Global focus ring — tokens use it inside components too */
 :focus-visible {
   outline: none;
+}
+
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid rgba(34, 211, 238, 0.55);
+  outline-offset: 2px;
 }
 
 /* Toast positioning is handled by sonner */

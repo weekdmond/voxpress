@@ -1,7 +1,7 @@
 import type { HTMLAttributes, ReactNode } from 'react';
 import s from './Chip.module.css';
 
-export type ChipVariant = 'default' | 'solid' | 'accent' | 'ok' | 'warn';
+export type ChipVariant = 'default' | 'solid' | 'accent' | 'ok' | 'warn' | 'danger';
 
 export interface ChipProps extends HTMLAttributes<HTMLSpanElement> {
   variant?: ChipVariant;
@@ -25,6 +25,7 @@ export function Chip({
     variant === 'accent' ? s.accent : '',
     variant === 'ok' ? s.ok : '',
     variant === 'warn' ? s.warn : '',
+    variant === 'danger' ? s.danger : '',
     mono ? s.mono : '',
     className ?? '',
   ]
