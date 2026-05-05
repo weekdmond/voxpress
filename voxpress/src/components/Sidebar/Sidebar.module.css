@@ -14,29 +14,51 @@
 }
 
 .brand {
-  position: relative;
-  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 64px;
+  padding: 10px 11px;
   overflow: hidden;
   border-radius: 18px;
-  background: #07111c;
-  box-shadow: 0 16px 36px rgba(7, 17, 28, 0.14);
+  background:
+    radial-gradient(circle at 17% 24%, rgba(0, 245, 255, 0.18), transparent 34%),
+    linear-gradient(145deg, #07111c 0%, #0b1420 58%, #101a27 100%);
+  border: 1px solid rgba(26, 200, 242, 0.18);
+  box-shadow: 0 14px 30px rgba(7, 17, 28, 0.12);
 }
-.brandLogo {
+.brandMark {
   display: block;
-  width: 100%;
-  height: auto;
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  object-fit: cover;
+  flex-shrink: 0;
+  box-shadow: 0 0 18px rgba(0, 245, 255, 0.15);
 }
-.brandVersion {
-  position: absolute;
-  right: 10px;
-  top: 9px;
+.brandText {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+.brandWordmark {
+  display: block;
+  width: 132px;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+  object-position: left center;
+}
+.brandMeta {
   font-family: var(--vp-font-mono);
-  font-size: 10.5px;
-  color: rgba(247, 251, 255, 0.7);
-  background: rgba(7, 17, 28, 0.58);
-  border: 1px solid rgba(66, 191, 255, 0.22);
-  padding: 2px 6px;
-  border-radius: var(--vp-radius-full);
+  font-size: 9.5px;
+  line-height: 1;
+  color: rgba(247, 251, 255, 0.56);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .section {

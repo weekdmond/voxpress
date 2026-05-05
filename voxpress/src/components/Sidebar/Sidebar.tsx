@@ -54,11 +54,19 @@ export function Sidebar() {
     <aside className={s.sidebar}>
       <div className={s.brand} aria-label="SpeechFolio">
         <img
-          className={s.brandLogo}
-          src="/brand/speechfolio-logo-lockup.png"
-          alt="SpeechFolio"
+          className={s.brandMark}
+          src="/brand/speechfolio-mark-square.png"
+          alt=""
+          aria-hidden="true"
         />
-        <div className={s.brandVersion}>v0.4</div>
+        <div className={s.brandText}>
+          <img
+            className={s.brandWordmark}
+            src="/brand/speechfolio-wordmark.png"
+            alt="SpeechFolio"
+          />
+          <div className={s.brandMeta}>AI archive</div>
+        </div>
       </div>
 
       <nav className={s.section} aria-label="主导航">
