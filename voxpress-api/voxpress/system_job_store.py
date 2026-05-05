@@ -1,13 +1,20 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import asyncio
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from voxpress.config import settings
 from voxpress.db import session_scope
 from voxpress.models import SystemJobRun
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -35,6 +42,7 @@ async def start_system_job_run(
     scope: str | None = None,
     detail: str | None = None,
 ) -> UUID:
+    await recover_stale_system_job_runs(job_key=job_key)
     try:
         async with session_scope() as s:
             row = SystemJobRun(
@@ -52,6 +60,70 @@ async def start_system_job_run(
         if _is_running_job_conflict(exc):
             raise SystemJobAlreadyRunning(job_key) from exc
         raise
+
+
+async def heartbeat_system_job_run(run_id: UUID) -> None:
+    async with session_scope() as s:
+        row = await s.scalar(
+            select(SystemJobRun)
+            .where(SystemJobRun.id == run_id, SystemJobRun.status == "running")
+            .limit(1)
+        )
+        if row is not None:
+            row.updated_at = _utc_now()
+
+
+async def recover_stale_system_job_runs(
+    *,
+    job_key: str | None = None,
+    stale_after_seconds: int | None = None,
+) -> int:
+    stale_after = stale_after_seconds or settings.system_job_stale_after_seconds
+    cutoff = _utc_now() - timedelta(seconds=stale_after)
+    clauses = [
+        SystemJobRun.status == "running",
+        SystemJobRun.updated_at < cutoff,
+    ]
+    if job_key:
+        clauses.append(SystemJobRun.job_key == job_key)
+
+    async with session_scope() as s:
+        rows = (await s.scalars(select(SystemJobRun).where(*clauses))).all()
+        now = _utc_now()
+        for row in rows:
+            row.status = "failed"
+            row.detail = f"{row.detail or row.job_name} · 运行心跳超时，已自动收口"
+            row.error = "system job heartbeat timed out"
+            row.finished_at = now
+            if row.started_at:
+                row.duration_ms = max(0, int((now - row.started_at).total_seconds() * 1000))
+        count = len(rows)
+    if count:
+        logger.warning("recovered %s stale system job run(s): job_key=%s", count, job_key or "*")
+    return count
+
+
+async def _heartbeat_loop(run_id: UUID, interval_seconds: int) -> None:
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await heartbeat_system_job_run(run_id)
+        except Exception:
+            logger.warning("system job heartbeat failed: run_id=%s", run_id, exc_info=True)
+
+
+@asynccontextmanager
+async def system_job_heartbeat(run_id: UUID) -> AsyncIterator[None]:
+    task = asyncio.create_task(
+        _heartbeat_loop(run_id, settings.system_job_heartbeat_seconds),
+        name=f"system-job-heartbeat:{run_id}",
+    )
+    try:
+        yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 async def finish_system_job_run(

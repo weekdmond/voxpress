@@ -13,7 +13,7 @@ from voxpress.db import get_session
 from voxpress.errors import ApiError
 from voxpress.models import SystemJobRun
 from voxpress.schemas import Page, SystemJobRunOut, SystemJobSummaryOut
-from voxpress.system_job_store import SystemJobAlreadyRunning
+from voxpress.system_job_store import SystemJobAlreadyRunning, recover_stale_system_job_runs
 
 router = APIRouter(prefix="/api/system-jobs", tags=["system-jobs"])
 
@@ -201,6 +201,7 @@ async def run_system_job(
     s: AsyncSession = Depends(get_session),
 ) -> SystemJobRunOut:
     _job_name_for_key(job_key)
+    await recover_stale_system_job_runs(job_key=job_key)
     running = await s.scalar(
         select(SystemJobRun)
         .where(SystemJobRun.job_key == job_key, SystemJobRun.status == "running")

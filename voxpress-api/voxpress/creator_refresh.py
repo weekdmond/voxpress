@@ -10,7 +10,9 @@ from voxpress.creator_sync import refresh_all_creators
 from voxpress.system_job_store import (
     SystemJobAlreadyRunning,
     finish_system_job_run,
+    recover_stale_system_job_runs,
     start_system_job_run,
+    system_job_heartbeat,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,7 +32,8 @@ def _job_detail(trigger_kind: str) -> str:
 
 async def _execute_run(run_id: UUID, *, recent_count: int) -> None:
     try:
-        summary = await refresh_all_creators(max_videos=recent_count)
+        async with system_job_heartbeat(run_id):
+            summary = await refresh_all_creators(max_videos=recent_count)
         status = "done"
         if summary.skipped >= summary.total and summary.total > 0:
             status = "skipped"
@@ -107,6 +110,7 @@ class CreatorRefreshScheduler:
             return
         if self._task and not self._task.done():
             return
+        await recover_stale_system_job_runs(job_key="creator_refresh")
         self._task = asyncio.create_task(self._run_loop(), name="creator-refresh-scheduler")
 
     async def stop(self) -> None:
@@ -125,15 +129,17 @@ class CreatorRefreshScheduler:
             settings.creator_refresh_recent_count,
         )
         while True:
+            sleep_sec = interval_sec
             try:
                 await start_creator_refresh_run(trigger_kind="scheduled", background=False)
             except SystemJobAlreadyRunning:
                 logger.info("creator refresh skipped: another run is already active")
+                sleep_sec = min(interval_sec, settings.system_job_stale_after_seconds)
             except asyncio.CancelledError:
                 raise
 
             try:
-                await asyncio.sleep(interval_sec)
+                await asyncio.sleep(sleep_sec)
             except asyncio.CancelledError:
                 raise
 

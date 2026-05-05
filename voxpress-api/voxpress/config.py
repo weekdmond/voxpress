@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     creator_refresh_enabled: bool = True
     creator_refresh_interval_hours: int = Field(default=4, ge=1, le=168)
     creator_refresh_recent_count: int = Field(default=5, ge=1, le=20)
+    system_job_heartbeat_seconds: int = Field(default=30, ge=5, le=300)
+    system_job_stale_after_seconds: int = Field(default=600, ge=60, le=86_400)
     creator_import_max_videos: int = Field(default=20, ge=1, le=1000)
     creator_resolve_timeout_sec: int = Field(default=25, ge=5, le=120)
     creator_auto_task_enabled: bool = True

@@ -12,7 +12,11 @@ from voxpress.creator_sync import fetch_creator_page, load_cookie_text, upsert_s
 from voxpress.db import session_scope
 from voxpress.models import Creator
 from voxpress.pipeline.douyin_scraper import ScrapeError
-from voxpress.system_job_store import finish_system_job_run, start_system_job_run
+from voxpress.system_job_store import (
+    finish_system_job_run,
+    start_system_job_run,
+    system_job_heartbeat,
+)
 
 logger = logging.getLogger(__name__)
 _background_runs: set[asyncio.Task[None]] = set()
@@ -69,13 +73,14 @@ async def _execute_run(run_id: UUID, target: CreatorBackfillTarget) -> None:
             )
             return
 
-        page = await fetch_creator_page(
-            target.sec_uid,
-            cookie_text=target.cookie_text,
-            max_videos=None,
-        )
-        async with session_scope() as s:
-            await upsert_scraped_page(s, page, prune_missing=True)
+        async with system_job_heartbeat(run_id):
+            page = await fetch_creator_page(
+                target.sec_uid,
+                cookie_text=target.cookie_text,
+                max_videos=None,
+            )
+            async with session_scope() as s:
+                await upsert_scraped_page(s, page, prune_missing=True)
 
         total = page.creator.video_count or target.listed_video_count or len(page.videos)
         processed = len(page.videos)
