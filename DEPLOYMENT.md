@@ -8,7 +8,88 @@
 
 ---
 
+## 0. 当前生产实际拓扑（速查）
+
+> 本节是**线上现状速查**，与下面 §1–§9 描述的"目标方案"不完全一致。接手或排查时**先看本节**对齐事实，再查具体步骤。最近一次校对：2026-05-05。
+
+### 0.1 主机清单
+
+| 角色 | hostname | 公网 EIP | 内网 IP | ssh-relay 入口 |
+|---|---|---|---|---|
+| App（API + Worker + Nginx + Dashboard 静态） | `speechfolio`（曾用 `voxpress-20260423`） | `47.237.81.215` | `192.168.233.81` | `ssh-relay 47.237.81.215` |
+| PG（PostgreSQL 16） | `postgres-20260424` | `43.98.194.178` | `192.168.233.52` | `ssh-relay 43.98.194.178` |
+| 公网入口 | 阿里云 SLB（实例 ID 待补） | — | — | 阿里云控制台 |
+
+**对外域名**：`https://app.speechfolio.com/`（Dashboard + `/api/*`）。SLB 上做 SSL 卸载，再把请求转到 App ECS 的 `:8080`。
+
+历史 EIP（已下线但 App 机 nginx `server_name` 仍残留）：`43.98.200.159`、`43.98.204.138`。维护时可清掉。
+
+### 0.2 关键路径与服务
+
+**App 机（`47.237.81.215`）**：
+
+- 代码：`/home/work/app/voxpress-api`（**注意**：不是 §6.1 模板里的 `/home/voxpress/voxpress-api`，运行账号是 `work`）
+- 环境：`/home/work/app/voxpress-api/.env`（auto-generated，文件头有时间戳注释）
+- 日志：`/var/voxpress/logs/{api,worker}.log` + `journalctl -u voxpress-{api,worker}`
+- 媒体缓存：`/var/voxpress/{audio,video}`
+- systemd 单元：`voxpress-api.service`、`voxpress-worker.service`
+- Nginx：listen `0.0.0.0:8080`（**不是** 80/443），配置 `/etc/nginx/sites-available/voxpress`
+
+**PG 机（`43.98.194.178`）**：
+
+- 数据：`/var/lib/postgresql/16/main`
+- 日志：`/var/log/postgresql/postgresql-16-main.log`
+- 监听：`127.0.0.1:5432` + `192.168.233.52:5432`（不监听公网）
+- 数据库：`voxpress`，所属角色 `voxpress`
+- 客户端 ACL **三层**（都要放行 App 子网）：
+  - `pg_hba.conf`: `host voxpress voxpress 192.168.233.0/24 scram-sha-256`
+  - `ufw`: `5432/tcp ALLOW IN 192.168.233.0/24`
+  - 阿里云安全组：入方向 5432 限 VPC 内
+
+### 0.3 公网入口（SLB 层，待补全）
+
+线上请求路径推断：
+
+```
+浏览器 → 阿里云 SLB(443/80, SSL 终结) → App ECS:8080(nginx) → 127.0.0.1:8787(uvicorn)
+```
+
+App 机本身**没有 listen 80/443**，也**没有 Let's Encrypt 证书目录**（`/etc/letsencrypt/live` 不存在），所以前面必有 SLB（或类似负载均衡）做 443→8080 转发与 SSL 卸载。
+
+接手时到阿里云控制台核对并回写本节：
+
+- SLB 实例 ID / 名称
+- 监听规则（80→8080、443→8080 + SSL 证书）
+- 后端服务器组挂的 ECS 实例 ID 是否就是当前 App 机
+- 健康检查路径（建议 `GET /api/health`，期望 200）
+- SSL 证书有效期与续期方式
+
+### 0.4 ssh-relay 工具（团队约定）
+
+`ssh-relay` 是本地脚本（`~/util/ssh-relay.sh`），传 IPv4 时等价于：
+
+```bash
+ssh -i ~/.ssh/tflyer-sg-inter-ssh-key-423.pem root@<ip>
+```
+
+命名别名（`ssh-relay hb` / `ssh-relay tf` 等）对应不同 key，看脚本即可。
+
+### 0.5 与 §1–§9 目标方案的主要差异
+
+| 项 | §1–§9 文档目标 | 当前线上 |
+|---|---|---|
+| PG 拓扑 | 同机本地 unix socket | 拆机，跨内网走 5432 |
+| App 用户/路径 | `voxpress`/`/home/voxpress/voxpress-api` | `work`/`/home/work/app/voxpress-api` |
+| Nginx 入口 | 直接 listen 80/443 + Let's Encrypt | listen 8080，SLB 在前做 SSL 卸载 |
+| 客户端 DB ACL | 默认 localhost | pg_hba + ufw + 安全组 三层放行子网 |
+
+故障排查标准顺序见 §10.6；ECS 重建/换 IP 的回灌清单见 §10.7；本次双机拓扑的踩坑总结见 §12 第 14–17 条。
+
+---
+
 ## 1. 架构与资源清单
+
+> **注**：本节是**全新部署的目标方案**（单机自托管全部组件）。当前线上实际是 §0 描述的双机拆分拓扑，请以 §0 为准。
 
 ```
               ┌───────── 浏览器 ─────────┐
@@ -178,6 +259,8 @@ sudo -u voxpress psql -h 127.0.0.1 -U voxpress -d voxpress -c 'select 1;'
 ## 6. 应用部署
 
 ### 6.1 拉代码 + 虚拟环境
+
+> **注**：实际线上路径是 `/home/work/app/voxpress-api`，运行账号是 `work`。新机器全新部署可按下方模板，老机器接手以 §0 为准。
 
 ```bash
 su - voxpress
@@ -465,6 +548,31 @@ certbot --nginx -d voxpress.yourdomain.com --agree-tos -m you@example.com --redi
 
 ---
 
+## 9.5 公网入口实际拓扑（SLB → Nginx，线上现状）
+
+§9 描述的是 nginx 直接 listen 80/443 + certbot 续证的"裸 ECS"模式。**线上实际不是这个**：
+
+```
+浏览器 → 阿里云 SLB(443/80, SSL 终结) → App ECS:8080(nginx) → 127.0.0.1:8787(uvicorn)
+```
+
+因此 App 机的 nginx 配置上：
+
+- `listen 8080;`（不是 `listen 80; listen 443 ssl;`）
+- 不需要 `ssl_certificate` 行（SSL 在 SLB 卸载）
+- `/etc/letsencrypt/` 目录可能不存在，正常
+- `server_name` 保留 `_`（catch-all）+ 当前域名/EIP 即可，**不要再往里塞历史 EIP**（线上现存 `43.98.200.159` `43.98.204.138` 是历史漂移残留，下次维护可清理）
+- 阿里云**安全组**要放行 SLB 后端互通到 8080，**不要直接对 0.0.0.0/0 开 8080**
+
+升级或修改 nginx 配置时务必：
+
+1. `nginx -t` 通过后再 reload
+2. 改 listen / server_name 后到 SLB 控制台确认健康检查仍 200，否则 SLB 会把这台机器从后端组里摘掉（触发 502）
+
+SLB 配置详情待人工补充到 §0.3。
+
+---
+
 ## 10. 日常运维
 
 ### 10.1 日志
@@ -553,6 +661,126 @@ echo OK
 */5 * * * * /home/voxpress/healthcheck.sh || curl -s -X POST "https://oapi.dingtalk.com/robot/send?access_token=..." -H 'Content-Type: application/json' -d '{"msgtype":"text","text":{"content":"voxpress 健康检查失败"}}'
 ```
 
+### 10.6 故障诊断顺序（推荐 runbook）
+
+服务异常时**从配置往外查**，不要先 `systemctl status`。一次完整链路：
+
+**Step 1：核对配置（登 App 机第一动作）**
+
+```bash
+ssh-relay 47.237.81.215
+cd /home/work/app/voxpress-api
+grep -E "^VOXPRESS_(DB_URL|CORS_ORIGINS|HOST|PORT)" .env
+```
+
+确认：DB host 指向哪台、CORS 是否含当前域名/EIP。
+
+**Step 2：后端 self-check**
+
+```bash
+curl -s http://127.0.0.1:8787/api/health | jq
+```
+
+- `db:false` 或超时 → 跳 Step 3
+- 完全连不上 → `systemctl status voxpress-api`、`journalctl -u voxpress-api -n 100`
+
+**Step 3：App → PG 连通性**
+
+```bash
+PG_HOST=$(grep ^VOXPRESS_DB_URL .env | sed -E 's|.*@([^:/]+).*|\1|')
+timeout 5 bash -c "</dev/tcp/$PG_HOST/5432" && echo OPEN || echo BLOCKED
+
+PGPASSWORD=$(grep ^VOXPRESS_DB_URL .env | sed -E 's|.*://[^:]+:([^@]+)@.*|\1|') \
+  psql -h "$PG_HOST" -U voxpress -d voxpress -c "select 1"
+```
+
+- `BLOCKED` → PG 机的 ufw 或阿里云安全组没放行 App 子网
+- psql 报 `no pg_hba.conf entry` → PG 的 pg_hba 没放行 App 子网
+- psql 报 `password authentication failed` → 密码或角色错
+- timeout → PG 没起来或网络中断
+
+**Step 4：PG 端核查（ssh-relay 到 PG 机）**
+
+```bash
+ssh-relay 43.98.194.178
+systemctl is-active postgresql
+sudo -u postgres psql -l | grep voxpress           # 库存在
+sudo -u postgres psql -c "\du voxpress"            # 角色存在
+grep voxpress /etc/postgresql/16/main/pg_hba.conf  # 客户端子网
+ufw status verbose | grep 5432                     # 防火墙
+tail -50 /var/log/postgresql/postgresql-16-main.log
+```
+
+**Step 5：Worker 自身**
+
+```bash
+systemctl status voxpress-worker
+journalctl -u voxpress-worker -n 80 --no-pager
+tail -200 /var/voxpress/logs/worker.log
+```
+
+Worker 启动时立即建 DB 连接池，**DB 不通就 1/FAILURE 重启循环**。所以排到 Step 5 看 worker 日志通常已经定位完。
+
+**Step 6：Nginx（App 机 8080）**
+
+```bash
+nginx -t
+ss -ltnp | grep 8080
+curl -sS -H "Host: app.speechfolio.com" http://127.0.0.1:8080/api/health
+tail -30 /var/log/nginx/error.log
+```
+
+**Step 7：SLB / 公网（阿里云控制台）**
+
+- SLB 后端组健康检查状态
+- 监听规则是否还指向当前 ECS 实例
+- SSL 证书有效期
+
+**Step 8：DNS 与客户端**
+
+```bash
+dig app.speechfolio.com +short
+```
+
+浏览器 DevTools → Network 看 CORS、HTTPS、状态码。
+
+**经验**：~90% 的故障在 Step 1–4 定位。跳过 Step 1 直接 `systemctl` 是常见的浪费时间方式。
+
+### 10.7 ECS 重建 / EIP 漂移回灌清单
+
+阿里云 ECS 重启换可用区、重建实例、换 EIP 都会让 IP 变化。**不只 EIP 会变，私网 IP 也可能漂**——本次线上故障的根因就是 App 机私网 IP 从 `192.168.233.64` 漂到 `.81`，但 PG 端 ACL 写死单 IP `.64/32`，于是 worker 全挂。
+
+#### A. 私网 IP 变了（重启/重建/换可用区都可能）
+
+- [ ] **PG 机 `pg_hba.conf` 用子网而不是单 IP**：`host voxpress voxpress 192.168.233.0/24 scram-sha-256`，避免每次都改。改完 `systemctl reload postgresql`
+- [ ] **PG 机 `ufw` 用子网**：`ufw allow from 192.168.233.0/24 to any port 5432 proto tcp`
+- [ ] 阿里云**安全组**入方向规则也用子网（如果之前写死单 IP）
+- [ ] App 机 `.env VOXPRESS_DB_URL`：通常不用改（指向的是 PG 的内网 IP，PG 没动）
+
+#### B. 公网 EIP 变了
+
+- [ ] App 机 nginx `server_name` 加新 EIP/域名，**清掉旧 EIP**
+- [ ] App 机 `.env VOXPRESS_CORS_ORIGINS` 含新域名（前端构建里 `VITE_API_BASE` 也要更新，见 §8.3）
+- [ ] **阿里云 SLB 后端服务器组**：移除旧实例、加入当前 ECS（或确认健康检查仍通过）
+- [ ] 域名 DNS A 记录指向新 EIP（如果是直连模式）
+- [ ] 阿里云安全组入方向规则更新
+- [ ] 抖音 `cookie.txt`：换 IP 偶尔触发风控，跑 `/api/cookie/test` 验证
+- [ ] 如果用 nginx 直签 Let's Encrypt（非线上现状）：DNS 切到新 IP 后 `certbot renew --force-renewal`
+
+#### C. 实例 ID 变了（整体重建）
+
+- [ ] SLB 后端组重新挂当前 ECS（旧实例 ID 已失效）
+- [ ] 云监控/告警按 `instance_id` 配置的规则刷新
+- [ ] crontab / systemd timer 重装：备份脚本（§10.2）、媒体清理（§10.3）、healthcheck（§10.5）、cookie 巡检
+- [ ] 抖音 `cookie.txt`、DashScope key、OSS AK/SK 等密钥按 §6.2 重新配
+- [ ] 检查 `~/.ssh/known_hosts`：本地的旧 host key 要删，团队成员同步
+
+#### 治本建议（避免每次踩同样坑）
+
+1. **PG 改用 PrivateZone 私网域名**（阿里云免费）：把 `192.168.233.52` 起个 `pg.voxpress.internal` 解析，App `.env` 改成 `postgresql+asyncpg://voxpress:***@pg.voxpress.internal/voxpress`。下次 PG 漂 IP 只改 PrivateZone 一处。
+2. **App ECS 把 ENI 主私网 IP 设成"指定"** 而不是"自动分配"，从源头避免重启漂移。
+3. **DB ACL 写子网而不是单 IP**（A 节），是上面两条的兜底。
+
 ---
 
 ## 11. 上线后的调参节奏
@@ -591,6 +819,14 @@ echo OK
 11. **三处域名要对齐**：前端 `VITE_API_BASE` / 后端 `VOXPRESS_CORS_ORIGINS` / Nginx `server_name`，任一处不一致都会 CORS 或 404
 12. **`index.html` 必须 `no-cache`**，否则发布了新版入口仍被 CDN 或浏览器缓存，用户看到的还是老页；`/assets/*` 反过来要长缓存 + `immutable`（Vite 已经在文件名里带哈希）
 13. **rsync 用 `--delete`**：不用的话老版本的 js/css 会留在服务器上，磁盘慢慢涨；但注意**先确认目标目录正确**，别把 `/var/www/` 当成 `/var/www/voxpress-web/` 推错位置
+
+**双机拓扑 / ECS 重建**：
+
+14. **PG 拆机后 ufw + pg_hba 双层 ACL**：单机部署时 PG 走 unix socket 没这问题，拆机后客户端走 TCP，**两层都要放行**。只改 pg_hba 不改 ufw 会 timeout（TCP 层就被拦）；只改 ufw 不改 pg_hba 会 auth fail。建议都用子网（§10.7-A）。本次故障的根因。
+15. **ECS 重建/重启不只换 EIP，私网 IP 也会漂**：本次 App 机私网从 `192.168.233.64` 漂到 `.81`，pg_hba 写死 `.64/32` 直接挂。固定 ENI 主私网 IP 或用子网放行（§10.7）。
+16. **Nginx `server_name` 残留旧 EIP**：线上仍能看到 `43.98.200.159 43.98.204.138`，是历史 EIP 漂移没收尾，不影响功能但会迷惑后人核对部署。维护时顺手清掉。
+17. **登机第一动作是 `cat .env` 不是 `systemctl status`**：从配置往外查（§10.6 标准顺序）。跳过 Step 1 直接 `systemctl` 经常导致按文档假设瞎排查（如假设 PG 在本机，而实际是拆机）。
+18. **`.env` 是脚本生成的**：文件头有 `# Auto-generated YYYY-MM-DDTHH:MM:SS+08:00` 注释。换密码、迁机时如何重新生成（生成器位置/约定）目前文档缺失，team 需要补一份。
 
 ---
 
