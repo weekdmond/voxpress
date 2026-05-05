@@ -14,47 +14,29 @@
 }
 
 .brand {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  padding: 2px 6px;
-}
-.brandMark {
-  width: 36px;
-  height: 36px;
-  border-radius: 12px;
-  background:
-    radial-gradient(circle at 32% 28%, rgba(0, 245, 255, 0.28), transparent 42%),
-    linear-gradient(145deg, #07111c 0%, #0b1420 52%, #111a27 100%);
-  border: 1px solid rgba(55, 217, 255, 0.24);
-  box-shadow: 0 10px 24px rgba(0, 178, 255, 0.14), inset 0 0 0 1px rgba(255, 255, 255, 0.04);
-  display: grid;
-  place-items: center;
+  position: relative;
+  padding: 0;
   overflow: hidden;
-  flex-shrink: 0;
+  border-radius: 18px;
+  background: #07111c;
+  box-shadow: 0 16px 36px rgba(7, 17, 28, 0.14);
 }
-.brandMarkIcon {
-  width: 31px;
-  height: 31px;
+.brandLogo {
   display: block;
-  filter: drop-shadow(0 0 5px rgba(0, 245, 255, 0.34));
-}
-.brandName {
-  font-family: var(--vp-font-mono);
-  font-size: 15.5px;
-  font-weight: 600;
-  letter-spacing: -0.07em;
-  color: var(--vp-ink);
-  line-height: 1;
-}
-.brandAccent {
-  color: #18c8f2;
+  width: 100%;
+  height: auto;
 }
 .brandVersion {
+  position: absolute;
+  right: 10px;
+  top: 9px;
   font-family: var(--vp-font-mono);
   font-size: 10.5px;
-  color: var(--vp-ink-3);
-  margin-left: auto;
+  color: rgba(247, 251, 255, 0.7);
+  background: rgba(7, 17, 28, 0.58);
+  border: 1px solid rgba(66, 191, 255, 0.22);
+  padding: 2px 6px;
+  border-radius: var(--vp-radius-full);
 }
 
 .section {
