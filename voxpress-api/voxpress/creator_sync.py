@@ -66,26 +66,37 @@ async def upsert_scraped_page(
 async def refresh_all_creators(*, max_videos: int) -> CreatorRefreshSummary:
     async with session_scope() as s:
         cookie_text = await load_cookie_text(s)
-        rows = (
+        douyin_rows = (
             await s.execute(
                 select(Creator.id, Creator.external_id)
                 .where(Creator.platform == "douyin")
                 .order_by(Creator.followers.desc(), Creator.id.asc())
             )
         ).all()
+        youtube_rows = (
+            await s.execute(
+                select(Creator.id, Creator.external_id)
+                .where(Creator.platform == "youtube")
+                .order_by(Creator.followers.desc(), Creator.id.asc())
+            )
+        ).all()
 
-    total = len(rows)
+    total = len(douyin_rows) + len(youtube_rows)
     if total == 0:
         return CreatorRefreshSummary(total=0, refreshed=0, failed=0, skipped=0)
-    if not cookie_text or not cookie_text.strip():
+    if douyin_rows and (not cookie_text or not cookie_text.strip()):
         logger.warning("creator refresh skipped: missing Douyin cookie")
-        return CreatorRefreshSummary(total=total, refreshed=0, failed=0, skipped=total)
+        if not youtube_rows:
+            return CreatorRefreshSummary(total=total, refreshed=0, failed=0, skipped=total)
 
     refreshed = 0
     failed = 0
+    skipped = len(douyin_rows) if douyin_rows and (not cookie_text or not cookie_text.strip()) else 0
     auto_tasks = 0
 
-    for creator_id, sec_uid in rows:
+    for creator_id, sec_uid in douyin_rows:
+        if not cookie_text or not cookie_text.strip():
+            continue
         try:
             page = await fetch_creator_page(sec_uid, cookie_text=cookie_text, max_videos=max_videos)
         except ScrapeError as e:
@@ -113,11 +124,33 @@ async def refresh_all_creators(*, max_videos: int) -> CreatorRefreshSummary:
             await emit_task_create(task_id)
         refreshed += 1
 
+    if youtube_rows:
+        from voxpress.youtube_sync import sync_youtube_channel_by_id
+
+        for creator_id, channel_id in youtube_rows:
+            try:
+                _creator, _fetched, task_ids = await sync_youtube_channel_by_id(
+                    channel_id,
+                    max_videos=max_videos,
+                    prune_missing=False,
+                )
+            except Exception as e:  # noqa: BLE001
+                failed += 1
+                logger.warning(
+                    "youtube creator refresh failed for creator_id=%s channel_id=%s: %s",
+                    creator_id,
+                    channel_id,
+                    e,
+                )
+                continue
+            auto_tasks += len(task_ids)
+            refreshed += 1
+
     return CreatorRefreshSummary(
         total=total,
         refreshed=refreshed,
         failed=failed,
-        skipped=0,
+        skipped=skipped,
         auto_tasks=auto_tasks,
     )
 

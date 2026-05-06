@@ -29,6 +29,7 @@ class ExtractorResult:
     video_path: Path | None = None
     media_object_key: str | None = None
     audio_object_key: str | None = None
+    platform: str = "douyin"
 
 
 @dataclass

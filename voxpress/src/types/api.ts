@@ -1,5 +1,5 @@
 export type ISO8601 = string;
-export type Platform = 'douyin';
+export type Platform = 'douyin' | 'youtube';
 
 export interface Page<T> {
   items: T[];

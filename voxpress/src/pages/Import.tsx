@@ -87,7 +87,19 @@ function VideoThumb({ src, seed }: { src: string | null; seed: number }) {
   );
 }
 
-function DouyinBadge() {
+function PlatformBadge({ platform }: { platform: Creator['platform'] }) {
+  if (platform === 'youtube') {
+    return (
+      <span className={s.platformBadge} title="YouTube">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-label="YouTube">
+          <path
+            d="M21.6 7.2a3 3 0 0 0-2.1-2.1C17.7 4.6 12 4.6 12 4.6s-5.7 0-7.5.5a3 3 0 0 0-2.1 2.1C2 9 2 12 2 12s0 3 .4 4.8a3 3 0 0 0 2.1 2.1c1.8.5 7.5.5 7.5.5s5.7 0 7.5-.5a3 3 0 0 0 2.1-2.1C22 15 22 12 22 12s0-3-.4-4.8ZM10 15.4V8.6l5.8 3.4L10 15.4Z"
+            fill="currentColor"
+          />
+        </svg>
+      </span>
+    );
+  }
   return (
     <span className={s.platformBadge} title="抖音">
       <svg viewBox="0 0 48 48" width="16" height="16" aria-label="抖音">
@@ -98,6 +110,24 @@ function DouyinBadge() {
       </svg>
     </span>
   );
+}
+
+function creatorExternalUrl(creator: Creator): string | null {
+  if (!creator.external_id) return null;
+  if (creator.platform === 'youtube') {
+    return creator.external_id.startsWith('UC')
+      ? `https://www.youtube.com/channel/${creator.external_id}`
+      : `https://www.youtube.com/${creator.handle}`;
+  }
+  return `https://www.douyin.com/user/${creator.external_id}`;
+}
+
+function platformLabel(platform: Creator['platform']): string {
+  return platform === 'youtube' ? 'YouTube' : '抖音';
+}
+
+function maybeCount(value: number): string {
+  return value > 0 ? formatCount(value) : '—';
 }
 
 interface DropdownProps<T extends string> {
@@ -368,7 +398,7 @@ export function ImportPage() {
             <div className={s.creatorMain}>
               <div className={s.titleRow}>
                 <span className={s.creatorName}>{creator.name}</span>
-                <DouyinBadge />
+                <PlatformBadge platform={creator.platform} />
                 {creator.verified ? <span className={s.chip}>蓝V</span> : null}
                 <span className={[s.chip, s.chipOk].join(' ')}>已转 {organizedCount}</span>
                 {pendingCount > 0 ? (
@@ -376,31 +406,33 @@ export function ImportPage() {
                     待处理 {pendingCount.toLocaleString()}
                   </span>
                 ) : null}
-                {creator.external_id ? (
+                {creatorExternalUrl(creator) ? (
                   <a
                     className={s.chipLink}
-                    href={`https://www.douyin.com/user/${creator.external_id}`}
+                    href={creatorExternalUrl(creator) ?? undefined}
                     target="_blank"
                     rel="noreferrer noopener"
-                    title="在抖音打开创作者主页"
+                    title={`在 ${platformLabel(creator.platform)} 打开博主主页`}
                   >
                     <Icon name="external" size={11} />
-                    在抖音查看
+                    在 {platformLabel(creator.platform)} 查看
                   </a>
                 ) : null}
-                <button
-                  className={s.chipButton}
-                  disabled={backfillMut.isPending}
-                  onClick={() => backfillMut.mutate()}
-                  title="后台补齐这个来源尚未入库的作品"
-                >
-                  <Icon name="refresh" size={11} />
-                  {backfillMut.isPending
-                    ? '启动中'
-                    : backfillMissingCount > 0
-                      ? `补齐作品 ${formatCount(backfillMissingCount)}`
-                      : '重新补齐'}
-                </button>
+                {creator.platform === 'douyin' || backfillMissingCount > 0 ? (
+                  <button
+                    className={s.chipButton}
+                    disabled={backfillMut.isPending}
+                    onClick={() => backfillMut.mutate()}
+                    title="后台补齐这个博主尚未入库的作品"
+                  >
+                    <Icon name="refresh" size={11} />
+                    {backfillMut.isPending
+                      ? '启动中'
+                      : backfillMissingCount > 0
+                        ? `补齐作品 ${formatCount(backfillMissingCount)}`
+                        : '重新补齐'}
+                  </button>
+                ) : null}
               </div>
               <div className={s.creatorMeta}>
                 <span>{creator.handle}</span>
@@ -422,7 +454,7 @@ export function ImportPage() {
           </div>
           <div className={s.creatorStats}>
             <div className={s.creatorStat}>
-              <b>{formatCount(creator.followers)}</b>
+              <b>{maybeCount(creator.followers)}</b>
               <span>粉丝</span>
             </div>
             <div className={s.creatorStat}>
@@ -434,7 +466,7 @@ export function ImportPage() {
               <span>已抓</span>
             </div>
             <div className={s.creatorStat}>
-              <b>{formatCount(creator.total_likes)}</b>
+              <b>{maybeCount(creator.total_likes)}</b>
               <span>获赞</span>
             </div>
           </div>
@@ -600,9 +632,9 @@ export function ImportPage() {
                       <span className={s.videoId}>ID {v.id}</span>
                     </div>
                   </div>
-                  <span className={s.num}>{formatDuration(v.duration_sec)}</span>
-                  <span className={s.num}>{formatCount(v.likes)}</span>
-                  <span className={s.num}>{formatCount(v.plays)}</span>
+                  <span className={s.num}>{v.duration_sec ? formatDuration(v.duration_sec) : '—'}</span>
+                  <span className={s.num}>{maybeCount(v.likes)}</span>
+                  <span className={s.num}>{maybeCount(v.plays)}</span>
                   <span className={isOrganized ? s.stDone : s.stPending}>
                     {isOrganized ? '已转文章' : '待处理'}
                   </span>
@@ -615,7 +647,7 @@ export function ImportPage() {
                     href={v.source_url}
                     target="_blank"
                     rel="noreferrer noopener"
-                    title="在抖音打开"
+                    title={`在 ${creator ? platformLabel(creator.platform) : '平台'} 打开`}
                     onClick={(e) => e.stopPropagation()}
                   >
                     <Icon name="external" size={12} />

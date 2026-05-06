@@ -30,9 +30,9 @@ interface ResolveProgressStep {
   state: 'done' | 'current' | 'pending';
 }
 
-function lookValidDouyin(url: string): boolean {
+function looksValidImportUrl(url: string): boolean {
   if (!url.trim()) return false;
-  return /(?:v\.douyin\.com|douyin\.com|iesdouyin\.com)/.test(url);
+  return /(?:v\.douyin\.com|douyin\.com|iesdouyin\.com|youtube\.com|youtu\.be)/.test(url);
 }
 
 function looksLikeCreatorShareInput(raw: string): boolean {
@@ -40,7 +40,9 @@ function looksLikeCreatorShareInput(raw: string): boolean {
   return (
     /查看ta的更多作品|更多作品/.test(raw) ||
     /douyin\.com\/user\//.test(value) ||
-    /iesdouyin\.com\/share\/user\//.test(value)
+    /iesdouyin\.com\/share\/user\//.test(value) ||
+    /youtube\.com\/@/.test(value) ||
+    /youtube\.com\/channel\//.test(value)
   );
 }
 
@@ -72,18 +74,18 @@ function buildResolveProgress(raw: string, elapsedMs: number): {
     {
       icon: 'swap',
       label: '展开短链',
-      detail: '跟随 v.douyin.com 跳转到真实地址',
+      detail: '跟随短链跳转到真实地址',
     },
     {
       icon: 'search',
       label: '识别类型',
-      detail: '判断这是单条内容还是来源主页',
+      detail: '判断这是单条内容还是博主主页',
     },
     creatorLikely
       ? {
           icon: 'users',
-          label: '同步来源',
-          detail: '读取来源主页与最近公开内容',
+          label: '同步博主',
+          detail: '读取博主主页与最近公开内容',
         }
       : {
           icon: 'check',
@@ -94,24 +96,24 @@ function buildResolveProgress(raw: string, elapsedMs: number): {
 
   let headline = '正在提取分享文案里的链接…';
   if (currentStep === 1) headline = '正在展开分享短链…';
-  if (currentStep === 2) headline = '正在识别这是单条内容还是来源主页…';
+  if (currentStep === 2) headline = '正在识别这是单条内容还是博主主页…';
   if (currentStep >= 3) {
     headline = creatorLikely
-      ? '正在同步来源主页与公开内容…'
+      ? '正在同步博主主页与公开内容…'
       : '正在准备创建处理任务…';
   }
 
   let footnote = creatorLikely
-    ? '这类“查看TA的更多作品”分享通常会先同步来源主页，再跳转到来源页。'
-    : '单条公开内容通常会很快入队；如果被识别为来源主页，会额外同步公开内容列表。';
+    ? '博主主页会先同步公开内容列表，再跳转到博主视频库。'
+    : '单条公开内容通常会很快入队；如果被识别为博主主页，会额外同步公开内容列表。';
   if (elapsedMs >= 12000) {
     footnote = creatorLikely
       ? '平台侧响应偏慢，仍在同步主页和公开内容列表；这个过程通常比单条内容慢。'
-      : '仍在等待平台返回结果；如果它最终被识别成来源主页，会继续同步公开内容。';
+      : '仍在等待平台返回结果；如果它最终被识别成博主主页，会继续同步公开内容。';
   }
   if (elapsedMs >= 20000) {
     footnote =
-      `如果持续超过 ${CREATOR_RESOLVE_TIMEOUT_SEC} 秒，系统会自动提示同步超时；通常是平台响应较慢，或当前 Cookie 已失效。`;
+      `如果持续超过 ${CREATOR_RESOLVE_TIMEOUT_SEC} 秒，系统会自动提示同步超时；通常是平台响应较慢。`;
   }
 
   return {
@@ -160,7 +162,7 @@ export function HomePage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
 
-  const looksValid = useMemo(() => lookValidDouyin(url), [url]);
+  const looksValid = useMemo(() => looksValidImportUrl(url), [url]);
 
   const running = useRunningTasks();
   const { data: recentPage } = useQuery({
@@ -192,7 +194,7 @@ export function HomePage() {
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') {
           throw new Error(
-            '解析等待超时，请稍后重试。通常是抖音响应较慢，或当前 Cookie 已失效。',
+            '解析等待超时，请稍后重试。通常是平台响应较慢。',
           );
         }
         throw err;
@@ -313,10 +315,10 @@ export function HomePage() {
           className={[s.hint, url.trim() && !looksValid ? s.errorHint : ''].join(' ')}
         >
           {url.trim() && !looksValid
-            ? '当前连接器支持公共视频链接、来源主页链接或完整分享文案'
+            ? '当前连接器支持抖音 / YouTube 公共视频链接、博主主页链接或完整分享文案'
             : resolveLink.isPending
             ? '解析进行中；下面会显示当前阶段和慢请求提示。'
-            : '支持导入你拥有或已获授权的内容；公共链接 → 直接入队，来源主页 → 同步公开内容后进入来源页'}
+            : '支持抖音和 YouTube；公共链接 → 直接入队，博主主页 → 同步公开视频后进入博主视频库'}
         </div>
         {resolveLink.isPending ? (
           <div className={s.resolvePanel} role="status" aria-live="polite">

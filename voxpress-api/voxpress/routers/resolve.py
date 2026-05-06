@@ -27,10 +27,13 @@ from voxpress.db import get_session
 from voxpress.errors import ApiError, InvalidUrl
 from voxpress.models import Task, Video
 from voxpress.pipeline.douyin_scraper import ScrapeError
+from voxpress.pipeline.youtube_url import UnknownYouTubeLink, is_youtube_url, resolve_youtube_url
+from voxpress.pipeline.youtube_ytdlp import YouTubeExtractError, probe_video
 from voxpress.schemas import ResolveIn
 from voxpress.system_job_store import SystemJobAlreadyRunning
 from voxpress.task_store import emit_task_create
 from voxpress.url_resolve import UnknownDouyinLink, normalize_douyin_input, resolve
+from voxpress.youtube_sync import sync_youtube_channel, upsert_youtube_channel, upsert_youtube_video
 
 
 class ScrapeFailed(ApiError):
@@ -52,6 +55,9 @@ async def resolve_link(
     payload: ResolveIn, s: AsyncSession = Depends(get_session)
 ) -> dict:
     started_at = time.perf_counter()
+    if is_youtube_url(payload.url):
+        return await _resolve_youtube_link(payload.url, s=s, started_at=started_at)
+
     url = normalize_douyin_input(payload.url)
     if not url:
         raise InvalidUrl("链接不能为空")
@@ -169,6 +175,67 @@ async def resolve_link(
         "fetched_video_count": len(scraped.videos),
         "backfill_started": backfill_started,
         "backfill_run_id": backfill_run_id,
+    }
+
+
+async def _resolve_youtube_link(
+    url: str,
+    *,
+    s: AsyncSession,
+    started_at: float,
+) -> dict:
+    try:
+        info = resolve_youtube_url(url)
+    except UnknownYouTubeLink as e:
+        raise InvalidUrl(str(e)) from e
+
+    logger.info("resolve youtube classified kind=%s canonical_url=%s", info.kind, info.canonical_url)
+    if info.kind == "playlist":
+        raise InvalidUrl("暂不支持 YouTube playlist，请导入单条视频或频道")
+
+    if info.kind == "video":
+        try:
+            video_info = await probe_video(info.canonical_url)
+        except YouTubeExtractError as e:
+            raise ScrapeFailed(str(e), detail={"stage": "youtube_video_probe"}) from e
+        creator = await upsert_youtube_channel(s, video_info.channel)
+        await s.flush()
+        video = await upsert_youtube_video(s, creator.id, video_info)
+        task = Task(
+            source_url=video_info.source_url,
+            title_guess=video_info.title,
+            creator_id=creator.id,
+            video_id=video_info.id,
+            trigger_kind="manual",
+        )
+        s.add(task)
+        await s.commit()
+        await s.refresh(task)
+        await emit_task_create(task.id)
+        logger.info(
+            "resolve youtube video queued task_id=%s elapsed_ms=%d",
+            task.id,
+            int((time.perf_counter() - started_at) * 1000),
+        )
+        return {"kind": "video", "task_id": str(task.id)}
+
+    try:
+        creator, fetched_count, task_ids = await sync_youtube_channel(
+            info.canonical_url,
+            max_videos=settings.creator_import_max_videos,
+            prune_missing=False,
+        )
+    except YouTubeExtractError as e:
+        raise ScrapeFailed(str(e), detail={"stage": "youtube_channel_sync"}) from e
+    return {
+        "kind": "creator",
+        "creator_id": creator.id,
+        "name": creator.name,
+        "video_count": creator.video_count,
+        "fetched_video_count": fetched_count,
+        "backfill_started": False,
+        "backfill_run_id": None,
+        "auto_task_count": len(task_ids),
     }
 
 

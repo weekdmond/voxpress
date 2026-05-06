@@ -29,6 +29,7 @@ class CreatorBackfillNotFound(Exception):
 @dataclass(frozen=True)
 class CreatorBackfillTarget:
     creator_id: int
+    platform: str
     sec_uid: str
     name: str
     listed_video_count: int
@@ -38,13 +39,14 @@ class CreatorBackfillTarget:
 async def _load_target(creator_id: int) -> CreatorBackfillTarget:
     async with session_scope() as s:
         creator = await s.scalar(
-            select(Creator).where(Creator.id == creator_id, Creator.platform == "douyin").limit(1)
+            select(Creator).where(Creator.id == creator_id).limit(1)
         )
         if creator is None:
             raise CreatorBackfillNotFound(str(creator_id))
         cookie_text = await load_cookie_text(s)
         return CreatorBackfillTarget(
             creator_id=creator.id,
+            platform=creator.platform,
             sec_uid=creator.external_id,
             name=creator.name,
             listed_video_count=creator.video_count,
@@ -57,12 +59,32 @@ def _scope(target: CreatorBackfillTarget) -> str:
 
 
 def _detail(trigger_kind: str, target: CreatorBackfillTarget) -> str:
-    prefix = "首次导入后自动补齐" if trigger_kind == "auto" else "手动补齐来源作品"
+    prefix = "首次导入后自动补齐" if trigger_kind == "auto" else "手动补齐博主作品"
     return f"{prefix} · 主页标注 {target.listed_video_count} 条"
 
 
 async def _execute_run(run_id: UUID, target: CreatorBackfillTarget) -> None:
     try:
+        if target.platform == "youtube":
+            from voxpress.youtube_sync import sync_youtube_channel_by_id
+
+            async with system_job_heartbeat(run_id):
+                _creator, processed, _task_ids = await sync_youtube_channel_by_id(
+                    target.sec_uid,
+                    max_videos=None,
+                    prune_missing=True,
+                )
+            total = max(target.listed_video_count, processed)
+            await finish_system_job_run(
+                run_id,
+                status="done",
+                detail=f"补齐 {target.name} · 已入库 {processed}/{total} 条视频",
+                total_items=total,
+                processed_items=processed,
+                skipped_items=max(0, total - processed),
+            )
+            return
+
         if not target.cookie_text or not target.cookie_text.strip():
             await finish_system_job_run(
                 run_id,
@@ -140,7 +162,7 @@ async def start_creator_backfill_run(
     target = await _load_target(creator_id)
     run_id = await start_system_job_run(
         job_key="creator_backfill",
-        job_name="来源作品补齐",
+        job_name="博主作品补齐",
         trigger_kind=trigger_kind,
         scope=_scope(target),
         detail=_detail(trigger_kind, target),

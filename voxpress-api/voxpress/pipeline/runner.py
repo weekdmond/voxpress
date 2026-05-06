@@ -94,6 +94,30 @@ class TaskRunner:
         cookie_text = (cookie_row or {}).get("text") if cookie_row else None
         return DouyinWebExtractor(cookie_text=cookie_text)
 
+    async def _extractor_for_task(self, task: Task) -> Extractor:
+        if app_settings.pipeline == "stub":
+            return StubExtractor()
+        platform = await self._task_platform(task)
+        if platform == "youtube":
+            from voxpress.pipeline.youtube_ytdlp import YouTubeExtractor
+
+            return YouTubeExtractor()
+        from voxpress.pipeline.douyin_video import DouyinWebExtractor
+
+        cookie_row = await self._load_settings_entry("cookie")
+        cookie_text = (cookie_row or {}).get("text") if cookie_row else None
+        return DouyinWebExtractor(cookie_text=cookie_text)
+
+    async def _task_platform(self, task: Task) -> str:
+        if task.creator_id:
+            async with session_scope() as s:
+                creator = await s.get(Creator, task.creator_id)
+                if creator is not None:
+                    return creator.platform
+        if "youtu.be/" in task.source_url or "youtube.com/" in task.source_url:
+            return "youtube"
+        return "douyin"
+
     async def _transcriber_backend(self) -> Transcriber:
         if app_settings.pipeline == "stub":
             return StubTranscriber()
@@ -171,7 +195,6 @@ class TaskRunner:
         return bool((article_row or {}).get("generate_background_notes", True))
 
     async def download_stage(self, task_id: UUID) -> ExtractorResult:
-        extractor = await self._extractor_backend()
         async with session_scope() as s:
             task = await s.get(Task, task_id)
             if task is None:
@@ -180,6 +203,7 @@ class TaskRunner:
 
         meta = await self._restore_cached_extract(task_id)
         if meta is None:
+            extractor = await self._extractor_for_task(task)
             meta = await extractor.extract(url)
             await self._archive_media(meta)
 
@@ -218,7 +242,7 @@ class TaskRunner:
             await _extract_audio(video_path, audio_path)
             return audio_path
 
-        extractor = await self._extractor_backend()
+        extractor = await self._extractor_for_task(ctx.task)
         meta = await extractor.extract(ctx.task.source_url)
         await self._archive_media(meta)
         async with session_scope() as s:
@@ -233,8 +257,17 @@ class TaskRunner:
         return meta.audio_path
 
     async def transcribe_inline(self, task_id: UUID) -> TranscriptResult:
-        audio_path = await self.prepare_audio(task_id)
         ctx = await self._load_video_context(task_id)
+        if ctx.creator.platform == "youtube":
+            from voxpress.pipeline.youtube_ytdlp import fetch_transcript
+
+            transcript = await fetch_transcript(ctx.video.source_url)
+            if transcript is not None:
+                return transcript
+            if not app_settings.youtube_audio_enabled:
+                raise RuntimeError("YouTube 视频没有可用字幕，且当前已关闭音频转写")
+
+        audio_path = await self.prepare_audio(task_id)
         if await media_store.is_enabled() and not ctx.video.audio_object_key and audio_path.exists():
             try:
                 object_key = await media_store.upload_file(
@@ -512,6 +545,7 @@ class TaskRunner:
             video_path=None,
             media_object_key=video.media_object_key,
             audio_object_key=video.audio_object_key,
+            platform=creator.platform,
         )
 
     def _meta_from_video_context(self, ctx: VideoContext) -> ExtractorResult:
@@ -593,7 +627,7 @@ class TaskRunner:
     async def _upsert_creator(self, s: AsyncSession, meta: ExtractorResult) -> Creator:
         existing = await s.scalar(
             select(Creator).where(
-                Creator.platform == "douyin", Creator.external_id == meta.creator_external_id
+                Creator.platform == meta.platform, Creator.external_id == meta.creator_external_id
             )
         )
         if existing:
@@ -607,7 +641,7 @@ class TaskRunner:
             await s.flush()
             return existing
         c = Creator(
-            platform="douyin",
+            platform=meta.platform,
             external_id=meta.creator_external_id,
             handle=meta.creator_handle,
             name=meta.creator_name,
@@ -680,7 +714,7 @@ class TaskRunner:
         async with session_scope() as s:
             creator = await s.scalar(
                 select(Creator).where(
-                    Creator.platform == "douyin", Creator.external_id == meta.creator_external_id
+                    Creator.platform == meta.platform, Creator.external_id == meta.creator_external_id
                 )
             )
             if creator is None:

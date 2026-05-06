@@ -18,7 +18,7 @@ from voxpress.topic_taxonomy import DEFAULT_TOPIC_SYNONYMS, DEFAULT_TOPIC_TAXONO
 
 T = TypeVar("T")
 
-Platform = Literal["douyin"]
+Platform = Literal["douyin", "youtube"]
 
 
 class Page(BaseModel, Generic[T]):

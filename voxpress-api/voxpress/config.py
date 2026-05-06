@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     creator_resolve_timeout_sec: int = Field(default=25, ge=5, le=120)
     creator_auto_task_enabled: bool = True
     creator_auto_task_recent_count: int = Field(default=1, ge=1, le=20)
+    youtube_audio_enabled: bool = True
     oss_region: str | None = None
     oss_endpoint: str | None = None
     oss_bucket: str | None = None
