@@ -55,14 +55,14 @@ export function Sidebar() {
       <div className={s.brand} aria-label="SpeechFolio">
         <img
           className={s.brandMark}
-          src="/brand/speechfolio-mark-square.png"
+          src="/brand/speechfolio-mark-light-square.png"
           alt=""
           aria-hidden="true"
         />
         <div className={s.brandText}>
           <img
             className={s.brandWordmark}
-            src="/brand/speechfolio-wordmark.png"
+            src="/brand/speechfolio-wordmark-light.png"
             alt="SpeechFolio"
           />
           <div className={s.brandMeta}>AI archive</div>
