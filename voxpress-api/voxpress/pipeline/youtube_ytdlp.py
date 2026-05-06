@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from voxpress.config import settings
 from voxpress.pipeline.protocols import Extractor, ExtractorResult, TranscriptResult
 from voxpress.pipeline.youtube_oembed import fetch_oembed_video
@@ -133,33 +135,54 @@ def _resolve_channel_sync(url: str) -> YouTubeChannelInfo:
 def _fetch_channel_videos_sync(url: str, max_videos: int | None) -> tuple[YouTubeChannelInfo, list[YouTubeVideoInfo]]:
     import yt_dlp
 
-    url = _channel_videos_url(url)
     opts = {
         **_base_ytdlp_opts(),
         "skip_download": True,
         "extract_flat": "in_playlist",
         "playlistend": max_videos,
     }
+    tab_urls = _channel_tab_urls(url)
+    videos_by_id: dict[str, YouTubeVideoInfo] = {}
+    channel: YouTubeChannelInfo | None = None
     with yt_dlp.YoutubeDL(opts) as ydl:
-        try:
-            info = ydl.extract_info(url, download=False, process=False)
-        except Exception as exc:  # noqa: BLE001
-            raise YouTubeExtractError(f"YouTube 频道作品读取失败:{str(exc)[:200]}") from exc
-    if not isinstance(info, dict):
+        for tab_url in tab_urls:
+            try:
+                info = ydl.extract_info(tab_url, download=False, process=False)
+            except Exception as exc:  # noqa: BLE001
+                if tab_url == tab_urls[0]:
+                    raise YouTubeExtractError(f"YouTube 频道作品读取失败:{str(exc)[:200]}") from exc
+                continue
+            if not isinstance(info, dict):
+                continue
+            channel = channel or _channel_from_info(info)
+            entries = info.get("entries") or []
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                video_id = str(entry.get("id") or "").strip()
+                if not _looks_like_video_id(video_id) or video_id in videos_by_id:
+                    continue
+                active_channel = channel or _channel_from_info(info)
+                flat_video = _video_from_info(entry, channel=active_channel)
+                videos_by_id[video_id] = _enrich_video_info(flat_video, channel=active_channel)
+                if max_videos is not None and len(videos_by_id) >= max_videos:
+                    break
+            if max_videos is not None and len(videos_by_id) >= max_videos:
+                break
+    if channel is None:
         raise YouTubeExtractError("YouTube 频道返回空元数据")
-    channel = _channel_from_info(info)
-    videos: list[YouTubeVideoInfo] = []
-    entries = info.get("entries") or []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        video_id = str(entry.get("id") or "").strip()
-        if not _looks_like_video_id(video_id):
-            continue
-        flat_video = _video_from_info(entry, channel=channel)
-        videos.append(_enrich_video_info(flat_video, channel=channel))
-        if max_videos is not None and len(videos) >= max_videos:
-            break
+    declared_total = _scrape_channel_video_count(url)
+    channel = YouTubeChannelInfo(
+        channel_id=channel.channel_id,
+        handle=channel.handle,
+        name=channel.name,
+        avatar_url=channel.avatar_url,
+        followers=channel.followers,
+        video_count=max(declared_total or 0, len(videos_by_id), channel.video_count),
+    )
+    videos = sorted(videos_by_id.values(), key=lambda item: item.published_at, reverse=True)
+    if max_videos is not None:
+        videos = videos[:max_videos]
     return channel, videos
 
 
@@ -292,11 +315,66 @@ def _looks_like_video_id(value: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9_-]{11}", value))
 
 
-def _channel_videos_url(url: str) -> str:
+def _channel_tab_urls(url: str) -> list[str]:
     stripped = url.rstrip("/")
     if re.search(r"/(videos|streams|shorts)$", stripped):
-        return stripped
-    return f"{stripped}/videos"
+        base = stripped.rsplit("/", 1)[0]
+    else:
+        base = stripped
+    return [f"{base}/videos", f"{base}/shorts", f"{base}/streams"]
+
+
+def _channel_videos_url(url: str) -> str:
+    return _channel_tab_urls(url)[0]
+
+
+def _scrape_channel_video_count(url: str) -> int:
+    stripped = url.rstrip("/")
+    base = stripped.rsplit("/", 1)[0] if re.search(r"/(videos|streams|shorts)$", stripped) else stripped
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
+        ),
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    }
+    try:
+        with httpx.Client(timeout=15, follow_redirects=True, headers=headers, trust_env=False) as client:
+            html = client.get(base).text
+    except Exception:
+        return 0
+    patterns = [
+        r'"content":"([\d,.]+\s*万?)\s*个视频","styleRuns"',
+        r'"content":"([\d,.]+\s*[KMB]?)\s+videos","styleRuns"',
+        r"([\d,.]+\s*万?)\s*个视频",
+        r"([\d,.]+\s*[KMB]?)\s+videos",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, html, re.IGNORECASE)
+        if match:
+            return _parse_compact_count(match.group(1))
+    return 0
+
+
+def _parse_compact_count(raw: str) -> int:
+    text = raw.strip().replace(",", "")
+    multiplier = 1
+    if text.endswith("万"):
+        multiplier = 10_000
+        text = text[:-1]
+    elif text[-1:].upper() == "K":
+        multiplier = 1_000
+        text = text[:-1]
+    elif text[-1:].upper() == "M":
+        multiplier = 1_000_000
+        text = text[:-1]
+    elif text[-1:].upper() == "B":
+        multiplier = 1_000_000_000
+        text = text[:-1]
+    try:
+        return int(float(text) * multiplier)
+    except ValueError:
+        return 0
 
 
 def _enrich_video_info(video: YouTubeVideoInfo, *, channel: YouTubeChannelInfo) -> YouTubeVideoInfo:

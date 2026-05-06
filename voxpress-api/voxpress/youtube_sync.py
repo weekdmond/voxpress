@@ -64,7 +64,7 @@ async def sync_youtube_channel(
                 new_videos.append(new_video)
         if prune_missing:
             await _prune_stale_videos(s, creator.id, [item.id for item in videos])
-        creator.video_count = len(videos)
+        creator.video_count = max(channel.video_count, len(videos))
         tasks = await _create_auto_tasks(s, new_videos) if create_tasks else []
         task_ids = [task.id for task in tasks]
         await s.flush()
