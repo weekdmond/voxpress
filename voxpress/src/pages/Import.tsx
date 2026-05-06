@@ -418,21 +418,19 @@ export function ImportPage() {
                     在 {platformLabel(creator.platform)} 查看
                   </a>
                 ) : null}
-                {creator.platform === 'douyin' || backfillMissingCount > 0 ? (
-                  <button
-                    className={s.chipButton}
-                    disabled={backfillMut.isPending}
-                    onClick={() => backfillMut.mutate()}
-                    title="后台补齐这个博主尚未入库的作品"
-                  >
-                    <Icon name="refresh" size={11} />
-                    {backfillMut.isPending
-                      ? '启动中'
-                      : backfillMissingCount > 0
-                        ? `补齐作品 ${formatCount(backfillMissingCount)}`
-                        : '重新补齐'}
-                  </button>
-                ) : null}
+                <button
+                  className={s.chipButton}
+                  disabled={backfillMut.isPending}
+                  onClick={() => backfillMut.mutate()}
+                  title="后台重新同步这个博主的作品"
+                >
+                  <Icon name="refresh" size={11} />
+                  {backfillMut.isPending
+                    ? '启动中'
+                    : backfillMissingCount > 0
+                      ? `补齐作品 ${formatCount(backfillMissingCount)}`
+                      : '重新同步'}
+                </button>
               </div>
               <div className={s.creatorMeta}>
                 <span>{creator.handle}</span>

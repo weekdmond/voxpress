@@ -127,6 +127,7 @@ def _resolve_channel_sync(url: str) -> YouTubeChannelInfo:
 def _fetch_channel_videos_sync(url: str, max_videos: int | None) -> tuple[YouTubeChannelInfo, list[YouTubeVideoInfo]]:
     import yt_dlp
 
+    url = _channel_videos_url(url)
     opts = {
         **_base_ytdlp_opts(),
         "skip_download": True,
@@ -278,6 +279,13 @@ def _looks_like_video_id(value: str) -> bool:
     if value.startswith("UC"):
         return False
     return bool(re.fullmatch(r"[A-Za-z0-9_-]{11}", value))
+
+
+def _channel_videos_url(url: str) -> str:
+    stripped = url.rstrip("/")
+    if re.search(r"/(videos|streams|shorts)$", stripped):
+        return stripped
+    return f"{stripped}/videos"
 
 
 def _channel_from_info(info: dict[str, Any]) -> YouTubeChannelInfo:
