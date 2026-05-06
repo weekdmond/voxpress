@@ -553,7 +553,7 @@ async def get_article(article_id: UUID, s: AsyncSession = Depends(get_session)) 
         raise NotFound("article references missing creator/video")
 
     source = ArticleSource(
-        platform="douyin",
+        platform=creator.platform,
         source_url=video.source_url,
         media_url=f"/api/videos/{video.id}/media" if video.media_object_key else None,
         duration_sec=video.duration_sec,
@@ -577,6 +577,7 @@ async def get_article(article_id: UUID, s: AsyncSession = Depends(get_session)) 
     base = ArticleOut.model_validate(art).model_dump()
     base["latest_task_id"] = latest_task_id
     base["cover_url"] = video.cover_url
+    base["duration_sec"] = video.duration_sec
     clean_md = strip_background_notes_md(base.get("content_md") or "")
     base["content_md"] = clean_md
     base["content_html"] = md_to_html(clean_md)

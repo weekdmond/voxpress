@@ -49,7 +49,9 @@ class YouTubeVideoInfo:
 
 class YouTubeExtractor(Extractor):
     async def extract(self, url: str) -> ExtractorResult:
-        return await asyncio.to_thread(_extract_audio_sync, url)
+        video = await probe_video(url)
+        audio_path = settings.audio_dir / f"{video.id}.m4a"
+        return _extractor_result_from_video(video, audio_path=audio_path)
 
 
 async def probe_video(url: str) -> YouTubeVideoInfo:
@@ -66,6 +68,10 @@ async def fetch_channel_videos(url: str, *, max_videos: int | None) -> tuple[You
 
 async def fetch_transcript(url: str) -> TranscriptResult | None:
     return await asyncio.to_thread(_fetch_transcript_sync, url)
+
+
+async def extract_audio(url: str) -> ExtractorResult:
+    return await asyncio.to_thread(_extract_audio_sync, url)
 
 
 def _base_ytdlp_opts() -> dict[str, Any]:
@@ -150,7 +156,8 @@ def _fetch_channel_videos_sync(url: str, max_videos: int | None) -> tuple[YouTub
         video_id = str(entry.get("id") or "").strip()
         if not _looks_like_video_id(video_id):
             continue
-        videos.append(_video_from_info(entry, channel=channel))
+        flat_video = _video_from_info(entry, channel=channel)
+        videos.append(_enrich_video_info(flat_video, channel=channel))
         if max_videos is not None and len(videos) >= max_videos:
             break
     return channel, videos
@@ -229,6 +236,10 @@ def _extract_audio_sync(url: str) -> ExtractorResult:
         matches = list(settings.video_dir.glob(f"youtube_{video.external_id}.*"))
         if matches:
             matches[0].replace(audio_path)
+    return _extractor_result_from_video(video, audio_path=audio_path)
+
+
+def _extractor_result_from_video(video: YouTubeVideoInfo, *, audio_path: Path) -> ExtractorResult:
     return ExtractorResult(
         video_id=video.id,
         creator_external_id=video.channel.channel_id,
@@ -286,6 +297,26 @@ def _channel_videos_url(url: str) -> str:
     if re.search(r"/(videos|streams|shorts)$", stripped):
         return stripped
     return f"{stripped}/videos"
+
+
+def _enrich_video_info(video: YouTubeVideoInfo, *, channel: YouTubeChannelInfo) -> YouTubeVideoInfo:
+    try:
+        enriched = _probe_video_sync(video.source_url)
+    except Exception:
+        return video
+    return YouTubeVideoInfo(
+        id=enriched.id,
+        external_id=enriched.external_id,
+        title=enriched.title or video.title,
+        duration_sec=enriched.duration_sec or video.duration_sec,
+        plays=enriched.plays or video.plays,
+        likes=enriched.likes or video.likes,
+        comments=enriched.comments or video.comments,
+        cover_url=enriched.cover_url or video.cover_url,
+        source_url=enriched.source_url or video.source_url,
+        published_at=enriched.published_at or video.published_at,
+        channel=channel,
+    )
 
 
 def _channel_from_info(info: dict[str, Any]) -> YouTubeChannelInfo:

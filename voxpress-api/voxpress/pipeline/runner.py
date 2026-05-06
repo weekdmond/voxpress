@@ -242,6 +242,22 @@ class TaskRunner:
             await _extract_audio(video_path, audio_path)
             return audio_path
 
+        if ctx.creator.platform == "youtube":
+            from voxpress.pipeline.youtube_ytdlp import extract_audio as extract_youtube_audio
+
+            meta = await extract_youtube_audio(ctx.task.source_url)
+            await self._archive_media(meta)
+            async with session_scope() as s:
+                task = await s.get(Task, task_id)
+                if task is not None:
+                    meta = await self._pin_creator_context(s, task, meta)
+                    creator = await self._upsert_creator(s, meta)
+                    video = await self._upsert_video(s, meta, creator.id)
+                    task.creator_id = creator.id
+                    task.video_id = video.id
+                    task.title_guess = meta.title
+            return meta.audio_path
+
         extractor = await self._extractor_for_task(ctx.task)
         meta = await extractor.extract(ctx.task.source_url)
         await self._archive_media(meta)
