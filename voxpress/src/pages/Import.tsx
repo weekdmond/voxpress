@@ -339,13 +339,13 @@ export function ImportPage() {
   return (
     <Page>
       <div className={s.crumb}>
-        <Link to="/library">← 来源库</Link>
+        <Link to="/library">← 博主列表</Link>
         <span className={s.crumbSep}>/</span>
         <span>{creator?.name ?? '—'}</span>
       </div>
 
       <PageHead
-        title="来源视频库"
+        title="博主视频库"
         meta={
           <>
             <span>{totalVideos.toLocaleString()} 条视频</span>

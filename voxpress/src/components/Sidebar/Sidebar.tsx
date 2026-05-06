@@ -35,7 +35,7 @@ export function Sidebar() {
 
   const items: NavItem[] = [
     { to: '/', label: '首页', icon: 'home', end: true },
-    { to: '/library', label: '来源库', icon: 'users', count: creators?.total },
+    { to: '/library', label: '博主列表', icon: 'users', count: creators?.total },
     { to: '/tasks', label: '任务', icon: 'swap' },
     { to: '/articles', label: '文章', icon: 'doc' },
     { to: '/settings', label: '设置', icon: 'cog' },
@@ -87,7 +87,7 @@ export function Sidebar() {
       </nav>
 
       <div className={s.section}>
-        <div className={s.sectionTitle}>最近来源</div>
+        <div className={s.sectionTitle}>最近博主</div>
         <div className={s.recent}>
           {recent.map((c) => (
             <NavLink
