@@ -474,7 +474,22 @@ def _enrich_video_info(
     try:
         enriched = _probe_video_sync(video.source_url, cookie_text=cookie_text)
     except Exception:
-        return video
+        scraped_published_at = _scrape_video_published_at(video.source_url, cookie_text=cookie_text)
+        if scraped_published_at is None:
+            return video
+        return YouTubeVideoInfo(
+            id=video.id,
+            external_id=video.external_id,
+            title=video.title,
+            duration_sec=video.duration_sec,
+            plays=video.plays,
+            likes=video.likes,
+            comments=video.comments,
+            cover_url=video.cover_url,
+            source_url=video.source_url,
+            published_at=scraped_published_at,
+            channel=channel,
+        )
     return YouTubeVideoInfo(
         id=enriched.id,
         external_id=enriched.external_id,
@@ -488,6 +503,40 @@ def _enrich_video_info(
         published_at=enriched.published_at or video.published_at,
         channel=channel,
     )
+
+
+def _scrape_video_published_at(url: str, cookie_text: str | None = None) -> datetime | None:
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
+        ),
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    }
+    if cookie_text:
+        headers["Cookie"] = cookie_text.strip()
+    try:
+        with httpx.Client(timeout=15, follow_redirects=True, headers=headers, trust_env=False) as client:
+            html = client.get(url).text
+    except Exception:
+        return None
+    return _parse_video_published_at_html(html)
+
+
+def _parse_video_published_at_html(html: str) -> datetime | None:
+    for pattern in [
+        r'"publishDate":"([^"]+)"',
+        r'"uploadDate":"([^"]+)"',
+        r'<meta itemprop="datePublished" content="([^"]+)"',
+    ]:
+        match = re.search(pattern, html)
+        if not match:
+            continue
+        try:
+            return datetime.fromisoformat(match.group(1).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+    return None
 
 
 def _channel_from_info(info: dict[str, Any]) -> YouTubeChannelInfo:

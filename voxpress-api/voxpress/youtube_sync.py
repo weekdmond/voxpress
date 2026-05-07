@@ -131,6 +131,7 @@ async def upsert_youtube_video(s: AsyncSession, creator_id: int, video: YouTubeV
     now = datetime.now(tz=timezone.utc)
     existing = await s.get(Video, video.id)
     if existing:
+        published_at = existing.published_at if _looks_like_refresh_timestamp(video.published_at, now) else video.published_at
         existing.creator_id = creator_id
         existing.title = video.title
         existing.duration_sec = video.duration_sec
@@ -139,7 +140,7 @@ async def upsert_youtube_video(s: AsyncSession, creator_id: int, video: YouTubeV
         existing.comments = video.comments
         existing.cover_url = video.cover_url
         existing.source_url = video.source_url
-        existing.published_at = video.published_at
+        existing.published_at = published_at
         existing.updated_at = now
         return None
     row = Video(
@@ -159,6 +160,11 @@ async def upsert_youtube_video(s: AsyncSession, creator_id: int, video: YouTubeV
     )
     s.add(row)
     return row
+
+
+def _looks_like_refresh_timestamp(value: datetime, now: datetime) -> bool:
+    value_utc = value.astimezone(timezone.utc) if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return abs((now - value_utc).total_seconds()) <= 600
 
 
 async def resolve_youtube_channel_for_url(url: str) -> YouTubeChannelInfo:

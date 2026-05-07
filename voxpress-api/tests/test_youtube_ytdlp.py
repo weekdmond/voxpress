@@ -8,6 +8,7 @@ from voxpress.pipeline.youtube_ytdlp import (
     _channel_videos_url,
     _looks_like_video_id,
     _parse_compact_count,
+    _parse_video_published_at_html,
     _write_youtube_cookie_file,
     probe_video_metadata_for_cookie_test,
 )
@@ -47,6 +48,13 @@ def test_parse_compact_count_handles_youtube_labels() -> None:
     assert _parse_compact_count("249") == 249
     assert _parse_compact_count("7.68万") == 76800
     assert _parse_compact_count("1.2K") == 1200
+
+
+def test_parse_video_published_at_html_reads_youtube_publish_date() -> None:
+    published = _parse_video_published_at_html('{"publishDate":"2026-04-24T04:00:21-07:00"}')
+
+    assert published is not None
+    assert published.astimezone(timezone.utc).isoformat() == "2026-04-24T11:00:21+00:00"
 
 
 async def test_youtube_extractor_reads_metadata_without_audio_download(monkeypatch) -> None:
