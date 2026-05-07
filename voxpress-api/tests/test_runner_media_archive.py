@@ -79,6 +79,23 @@ async def test_archive_media_uploads_to_oss_and_removes_local_files(monkeypatch,
     ]
 
 
+async def test_archive_media_can_keep_local_audio_for_asr(monkeypatch, tmp_path) -> None:
+    fake_store = FakeMediaStore(enabled=True)
+    monkeypatch.setattr(runner_module, "media_store", fake_store)
+    meta = _extractor_result(tmp_path)
+
+    await TaskRunner()._archive_media(meta, keep_audio=True)
+
+    assert meta.media_object_key == "youtube/videos/youtube:abc123.mp4"
+    assert meta.audio_object_key == "youtube/audio/youtube:abc123.m4a"
+    assert not meta.video_path.exists()
+    assert meta.audio_path.exists()
+    assert [object_key for _path, object_key in fake_store.uploads] == [
+        "youtube/videos/youtube:abc123.mp4",
+        "youtube/audio/youtube:abc123.m4a",
+    ]
+
+
 async def test_archive_media_requires_oss_for_downloaded_files(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(runner_module, "media_store", FakeMediaStore(enabled=False))
     meta = _extractor_result(tmp_path)

@@ -1,6 +1,9 @@
+from datetime import datetime, timezone
+
 from voxpress.pipeline.youtube_ytdlp import (
-    YouTubeExtractError,
+    YouTubeChannelInfo,
     YouTubeExtractor,
+    YouTubeVideoInfo,
     _channel_tab_urls,
     _channel_videos_url,
     _looks_like_video_id,
@@ -46,31 +49,38 @@ def test_parse_compact_count_handles_youtube_labels() -> None:
     assert _parse_compact_count("1.2K") == 1200
 
 
-async def test_youtube_extractor_downloads_audio_in_extract_stage(monkeypatch) -> None:
+async def test_youtube_extractor_reads_metadata_without_audio_download(monkeypatch) -> None:
     calls: list[str] = []
 
-    async def fake_extract_audio(url: str) -> object:
+    async def fake_probe_video(url: str) -> YouTubeVideoInfo:
         calls.append(url)
-        return object()
+        return YouTubeVideoInfo(
+            id="youtube:KJ-efTR7WxM",
+            external_id="KJ-efTR7WxM",
+            title="Test video",
+            duration_sec=123,
+            plays=456,
+            likes=7,
+            comments=8,
+            cover_url="https://i.ytimg.com/vi/KJ-efTR7WxM/hqdefault.jpg",
+            source_url=url,
+            published_at=datetime(2026, 5, 1, tzinfo=timezone.utc),
+            channel=YouTubeChannelInfo(
+                channel_id="UC9cfcOuTT9rYkyUimMjLxuw",
+                handle="@Money_or_Life",
+                name="Money or Life 美股频道",
+                followers=76800,
+                video_count=249,
+            ),
+        )
 
-    monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp.settings.youtube_audio_enabled", True)
-    monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp.extract_audio", fake_extract_audio)
+    monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp.probe_video", fake_probe_video)
 
     result = await YouTubeExtractor().extract("https://www.youtube.com/watch?v=KJ-efTR7WxM")
 
-    assert result is not None
+    assert result.video_id == "youtube:KJ-efTR7WxM"
+    assert result.audio_path.name == "youtube:KJ-efTR7WxM.m4a"
     assert calls == ["https://www.youtube.com/watch?v=KJ-efTR7WxM"]
-
-
-async def test_youtube_extractor_requires_audio_download_enabled(monkeypatch) -> None:
-    monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp.settings.youtube_audio_enabled", False)
-
-    try:
-        await YouTubeExtractor().extract("https://www.youtube.com/watch?v=KJ-efTR7WxM")
-    except YouTubeExtractError as exc:
-        assert "音频下载已关闭" in str(exc)
-    else:
-        raise AssertionError("expected YouTubeExtractError")
 
 
 def test_write_youtube_cookie_file_converts_cookie_header() -> None:

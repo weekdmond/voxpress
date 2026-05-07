@@ -256,7 +256,7 @@ class TaskRunner:
             from voxpress.pipeline.youtube_ytdlp import extract_audio as extract_youtube_audio
 
             meta = await extract_youtube_audio(ctx.task.source_url)
-            await self._archive_media(meta)
+            await self._archive_media(meta, keep_audio=True)
             async with session_scope() as s:
                 task = await s.get(Task, task_id)
                 if task is not None:
@@ -270,7 +270,7 @@ class TaskRunner:
 
         extractor = await self._extractor_for_task(ctx.task)
         meta = await extractor.extract(ctx.task.source_url)
-        await self._archive_media(meta)
+        await self._archive_media(meta, keep_audio=True)
         async with session_scope() as s:
             task = await s.get(Task, task_id)
             if task is not None:
@@ -294,7 +294,12 @@ class TaskRunner:
                 raise RuntimeError("YouTube 视频没有可用字幕，且当前已关闭音频转写")
 
         audio_path = await self.prepare_audio(task_id)
-        if not ctx.video.audio_object_key and audio_path.exists():
+        audio_object_key = ctx.video.audio_object_key
+        if not audio_object_key:
+            async with session_scope() as s:
+                current_video = await s.get(Video, ctx.video.id)
+                audio_object_key = current_video.audio_object_key if current_video is not None else None
+        if not audio_object_key and audio_path.exists():
             if not await media_store.is_enabled():
                 raise MediaStoreError("OSS 未配置，无法保存转写音频")
             try:
@@ -478,7 +483,7 @@ class TaskRunner:
         transcript = await self._load_transcript(ctx.video.id)
         return await self._save_article(meta=meta, transcript=transcript, organized=organized)
 
-    async def _archive_media(self, meta: ExtractorResult) -> None:
+    async def _archive_media(self, meta: ExtractorResult, *, keep_audio: bool = False) -> None:
         media_paths = [path for path in [meta.video_path, meta.audio_path] if path and path.exists()]
         if not media_paths:
             return
@@ -503,7 +508,7 @@ class TaskRunner:
                     meta.audio_path,
                     object_key=audio_object_key(meta.video_id, meta.audio_path, platform=meta.platform),
                 )
-                if meta.audio_object_key and meta.audio_path.exists():
+                if meta.audio_object_key and meta.audio_path.exists() and not keep_audio:
                     meta.audio_path.unlink()
             except MediaStoreError as e:
                 logger.warning("archive audio failed for %s: %s", meta.video_id, e)

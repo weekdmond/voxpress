@@ -122,7 +122,7 @@ async def _complete(task_id: UUID, lease_owner: str, article_id) -> None:
 
 def _download_stage_labels(platform: str) -> tuple[str, str, str]:
     if platform == "youtube":
-        return ("youtube", "yt-dlp audio", "yt-dlp 下载 YouTube 音频")
+        return ("youtube", "yt-dlp metadata", "yt-dlp 读取 YouTube 元信息")
     return ("douyin", "douyin-web", "Douyin Web API 读取视频并抽取音频")
 
 
@@ -139,7 +139,7 @@ async def _process_download(task_id: UUID, lease_owner: str) -> None:
     )
     await _ensure_progress(task_id, lease_owner, progress=5, detail=start_detail, eta_sec=None)
     meta = await runner.download_stage(task_id)
-    detail = "音频下载完成" if meta.platform == "youtube" else "下载完成 · 已抽取音频"
+    detail = "元信息读取完成" if meta.platform == "youtube" else "下载完成 · 已抽取音频"
     if meta.audio_object_key:
         detail = f"{detail} · 已归档音频"
     await finish_stage_run(
