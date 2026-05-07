@@ -51,9 +51,9 @@ class YouTubeVideoInfo:
 
 class YouTubeExtractor(Extractor):
     async def extract(self, url: str) -> ExtractorResult:
-        video = await probe_video(url)
-        audio_path = settings.audio_dir / f"{video.id}.m4a"
-        return _extractor_result_from_video(video, audio_path=audio_path)
+        if not settings.youtube_audio_enabled:
+            raise YouTubeExtractError("YouTube 音频下载已关闭，无法完成下载阶段")
+        return await extract_audio(url)
 
 
 async def probe_video(url: str) -> YouTubeVideoInfo:

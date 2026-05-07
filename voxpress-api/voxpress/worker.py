@@ -120,27 +120,35 @@ async def _complete(task_id: UUID, lease_owner: str, article_id) -> None:
         raise LeaseLost(f"task {task_id} lost lease before completion")
 
 
+def _download_stage_labels(platform: str) -> tuple[str, str, str]:
+    if platform == "youtube":
+        return ("youtube", "yt-dlp audio", "yt-dlp 下载 YouTube 音频")
+    return ("douyin", "douyin-web", "Douyin Web API 读取视频并抽取音频")
+
+
 async def _process_download(task_id: UUID, lease_owner: str) -> None:
+    platform = await runner.task_platform(task_id)
+    provider, model, start_detail = _download_stage_labels(platform)
     await start_stage_run(
         task_id,
         lease_owner=lease_owner,
         stage="download",
-        provider="douyin",
-        model="douyin-web",
-        detail="Douyin Web API 读取视频",
+        provider=provider,
+        model=model,
+        detail=start_detail,
     )
-    await _ensure_progress(task_id, lease_owner, progress=5, detail="Douyin Web API 读取视频", eta_sec=None)
+    await _ensure_progress(task_id, lease_owner, progress=5, detail=start_detail, eta_sec=None)
     meta = await runner.download_stage(task_id)
-    detail = "下载完成"
+    detail = "音频下载完成" if meta.platform == "youtube" else "下载完成 · 已抽取音频"
     if meta.audio_object_key:
-        detail = "下载完成 · 已归档音频"
+        detail = f"{detail} · 已归档音频"
     await finish_stage_run(
         task_id,
         lease_owner=lease_owner,
         stage="download",
         status="done",
-        provider="douyin",
-        model="douyin-web",
+        provider=provider,
+        model=model,
         detail=detail,
     )
     await _advance(task_id, lease_owner, stage="transcribe", progress=40, detail=detail)

@@ -1,4 +1,6 @@
 from voxpress.pipeline.youtube_ytdlp import (
+    YouTubeExtractError,
+    YouTubeExtractor,
     _channel_tab_urls,
     _channel_videos_url,
     _looks_like_video_id,
@@ -40,3 +42,30 @@ def test_parse_compact_count_handles_youtube_labels() -> None:
     assert _parse_compact_count("249") == 249
     assert _parse_compact_count("7.68万") == 76800
     assert _parse_compact_count("1.2K") == 1200
+
+
+async def test_youtube_extractor_downloads_audio_in_extract_stage(monkeypatch) -> None:
+    calls: list[str] = []
+
+    async def fake_extract_audio(url: str) -> object:
+        calls.append(url)
+        return object()
+
+    monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp.settings.youtube_audio_enabled", True)
+    monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp.extract_audio", fake_extract_audio)
+
+    result = await YouTubeExtractor().extract("https://www.youtube.com/watch?v=KJ-efTR7WxM")
+
+    assert result is not None
+    assert calls == ["https://www.youtube.com/watch?v=KJ-efTR7WxM"]
+
+
+async def test_youtube_extractor_requires_audio_download_enabled(monkeypatch) -> None:
+    monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp.settings.youtube_audio_enabled", False)
+
+    try:
+        await YouTubeExtractor().extract("https://www.youtube.com/watch?v=KJ-efTR7WxM")
+    except YouTubeExtractError as exc:
+        assert "音频下载已关闭" in str(exc)
+    else:
+        raise AssertionError("expected YouTubeExtractError")

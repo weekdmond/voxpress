@@ -118,6 +118,13 @@ class TaskRunner:
             return "youtube"
         return "douyin"
 
+    async def task_platform(self, task_id: UUID) -> str:
+        async with session_scope() as s:
+            task = await s.get(Task, task_id)
+            if task is None:
+                raise RuntimeError(f"task {task_id} missing")
+        return await self._task_platform(task)
+
     async def _transcriber_backend(self) -> Transcriber:
         if app_settings.pipeline == "stub":
             return StubTranscriber()
