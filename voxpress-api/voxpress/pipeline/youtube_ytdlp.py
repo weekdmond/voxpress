@@ -234,7 +234,8 @@ def _resolve_channel_sync(
                 raise YouTubeExtractError(f"YouTube 频道解析失败:{str(exc)[:200]}") from exc
     if not isinstance(info, dict):
         raise YouTubeExtractError("YouTube 频道返回空元数据")
-    return _channel_from_info(info)
+    channel = _channel_from_info(info)
+    return _merge_channel_about(channel, _scrape_channel_about_metadata(url, cookie_text, proxy_url))
 
 
 def _fetch_channel_videos_sync(
@@ -300,6 +301,7 @@ def _fetch_channel_videos_with_opts(
                 break
     if channel is None:
         raise YouTubeExtractError("YouTube 频道返回空元数据")
+    channel = _merge_channel_about(channel, _scrape_channel_about_metadata(url, cookie_text, proxy_url))
     declared_total = _scrape_channel_video_count(url)
     channel = YouTubeChannelInfo(
         channel_id=channel.channel_id,
@@ -624,7 +626,7 @@ def _channel_from_info(info: dict[str, Any]) -> YouTubeChannelInfo:
     )
     name = str(info.get("channel") or info.get("uploader") or info.get("title") or "YouTube")
     handle = _derive_handle(
-        str(info.get("channel_url") or info.get("uploader_url") or channel_id),
+        str(info.get("uploader_url") or info.get("channel_url") or channel_id),
         str(info.get("channel") or info.get("uploader") or name),
     )
     return YouTubeChannelInfo(
@@ -637,6 +639,85 @@ def _channel_from_info(info: dict[str, Any]) -> YouTubeChannelInfo:
         followers=int(info.get("channel_follower_count") or 0),
         video_count=int(info.get("playlist_count") or info.get("n_entries") or 0),
     )
+
+
+def _merge_channel_about(channel: YouTubeChannelInfo, about: dict[str, str | None]) -> YouTubeChannelInfo:
+    handle = about.get("handle") or channel.handle
+    return YouTubeChannelInfo(
+        channel_id=about.get("channel_id") or channel.channel_id,
+        handle=handle,
+        name=channel.name,
+        bio=about.get("bio") or channel.bio,
+        region=about.get("region") or channel.region,
+        avatar_url=channel.avatar_url,
+        followers=channel.followers,
+        video_count=channel.video_count,
+    )
+
+
+def _scrape_channel_about_metadata(
+    url: str,
+    cookie_text: str | None = None,
+    proxy_url: str | None = None,
+) -> dict[str, str | None]:
+    about_url = _channel_about_url(url)
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
+        ),
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    }
+    if cookie_text:
+        headers["Cookie"] = cookie_text.strip()
+    try:
+        with httpx.Client(
+            timeout=15,
+            follow_redirects=True,
+            headers=headers,
+            trust_env=False,
+            proxy=proxy_url,
+        ) as client:
+            html = client.get(about_url).text
+    except Exception:
+        return {}
+    canonical_url = _parse_json_string_field(html, "canonicalChannelUrl")
+    return {
+        "bio": _parse_channel_about_description(html) or _parse_json_string_field(html, "description"),
+        "region": _parse_json_string_field(html, "country"),
+        "handle": _derive_handle(canonical_url, "") if canonical_url else None,
+        "channel_id": _parse_json_string_field(html, "channelId"),
+    }
+
+
+def _channel_about_url(url: str) -> str:
+    stripped = url.rstrip("/")
+    base = stripped.rsplit("/", 1)[0] if re.search(r"/(videos|streams|shorts|about)$", stripped) else stripped
+    return f"{base}/about"
+
+
+def _parse_json_string_field(html: str, field: str) -> str | None:
+    match = re.search(rf'"{re.escape(field)}":"((?:\\.|[^"])*)"', html)
+    if not match:
+        return None
+    try:
+        value = json.loads(f'"{match.group(1)}"')
+    except json.JSONDecodeError:
+        return None
+    text = str(value or "").strip()
+    return text or None
+
+
+def _parse_channel_about_description(html: str) -> str | None:
+    match = re.search(r'"description":"((?:\\.|[^"])*)","descriptionLabel"', html)
+    if not match:
+        return None
+    try:
+        value = json.loads(f'"{match.group(1)}"')
+    except json.JSONDecodeError:
+        return None
+    text = str(value or "").strip()
+    return text or None
 
 
 def _clean_channel_description(value: Any) -> str | None:

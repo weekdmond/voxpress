@@ -9,7 +9,10 @@ from voxpress.pipeline.youtube_ytdlp import (
     _base_ytdlp_opts,
     _channel_from_info,
     _looks_like_video_id,
+    _merge_channel_about,
+    _parse_channel_about_description,
     _parse_compact_count,
+    _parse_json_string_field,
     _parse_video_published_at_html,
     _enrich_video_info,
     _write_youtube_cookie_file,
@@ -81,6 +84,60 @@ def test_channel_from_info_reads_description_and_best_avatar() -> None:
     assert channel.region == "新加坡"
     assert channel.avatar_url == "large.jpg"
     assert channel.video_count == 249
+
+
+def test_channel_from_info_prefers_uploader_url_for_handle() -> None:
+    channel = _channel_from_info(
+        {
+            "channel_id": "UC9cfcOuTT9rYkyUimMjLxuw",
+            "channel": "Money or Life 美股频道",
+            "channel_url": "https://www.youtube.com/channel/UC9cfcOuTT9rYkyUimMjLxuw",
+            "uploader_url": "https://www.youtube.com/@Money_or_Life",
+        }
+    )
+
+    assert channel.handle == "@Money_or_Life"
+
+
+def test_channel_about_parsers_read_displayed_description_and_country() -> None:
+    html = (
+        '"description":"欢迎订阅Money or Life 美股频道\\n谢谢所有人的支持！",'
+        '"descriptionLabel":{"content":"说明"},'
+        '"country":"新加坡",'
+        '"canonicalChannelUrl":"http://www.youtube.com/@Money_or_Life",'
+        '"channelId":"UC9cfcOuTT9rYkyUimMjLxuw"'
+    )
+
+    assert _parse_channel_about_description(html) == "欢迎订阅Money or Life 美股频道\n谢谢所有人的支持！"
+    assert _parse_json_string_field(html, "country") == "新加坡"
+    assert _parse_json_string_field(html, "canonicalChannelUrl") == "http://www.youtube.com/@Money_or_Life"
+
+
+def test_merge_channel_about_keeps_existing_values_when_about_missing() -> None:
+    channel = YouTubeChannelInfo(
+        channel_id="UC9cfcOuTT9rYkyUimMjLxuw",
+        handle="@Money_or_Life",
+        name="Money",
+        bio="old bio",
+        followers=76800,
+        video_count=249,
+    )
+
+    merged = _merge_channel_about(
+        channel,
+        {
+            "bio": "new bio",
+            "region": "新加坡",
+            "handle": None,
+            "channel_id": None,
+        },
+    )
+
+    assert merged.handle == "@Money_or_Life"
+    assert merged.bio == "new bio"
+    assert merged.region == "新加坡"
+    assert merged.followers == 76800
+    assert merged.video_count == 249
 
 
 def test_enrich_video_info_disables_oembed_fallback_for_publish_time(monkeypatch) -> None:
