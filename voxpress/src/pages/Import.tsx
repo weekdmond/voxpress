@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Page, PageHead } from '@/layouts/AppShell';
 import { useCrossPageSelection } from '@/hooks/useCrossPageSelection';
-import { Avatar, Icon } from '@/components/primitives';
+import { Avatar, Icon, Select } from '@/components/primitives';
 import { api } from '@/lib/api';
 import { formatCount, formatDate, formatDateTime, formatDuration } from '@/lib/format';
 import { mediaCandidates } from '@/lib/media';
@@ -23,7 +23,8 @@ type DurFilter = 'all' | '20s' | '60s' | '180s' | '600s';
 type HotFilter = 'all' | '1k' | '1w' | '5w';
 type TimeFilter = 'all' | '7d' | '30d' | '90d';
 
-const PAGE_SIZE = 40;
+const DEFAULT_PAGE_SIZE = 40;
+const PAGE_SIZE_OPTIONS = [20, 40, 80, 120];
 
 const STATUS_OPTIONS: { v: StatusFilter; label: string }[] = [
   { v: 'all', label: '全部' },
@@ -198,6 +199,7 @@ export function ImportPage() {
   const [time, setTime] = useState<TimeFilter>('all');
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [openDrop, setOpenDrop] = useState<string | null>(null);
 
   useEffect(() => {
@@ -228,10 +230,10 @@ export function ImportPage() {
     if (sinceDays) p.set('since', `${sinceDays}d`);
     if (q) p.set('q', q);
     if (status !== 'all') p.set('status', status);
-    p.set('limit', String(PAGE_SIZE));
-    p.set('offset', String((page - 1) * PAGE_SIZE));
+    p.set('limit', String(pageSize));
+    p.set('offset', String((page - 1) * pageSize));
     return p.toString();
-  }, [minDur, minLikes, sinceDays, q, status, page]);
+  }, [minDur, minLikes, sinceDays, q, status, page, pageSize]);
 
   const summaryParams = useMemo(() => {
     const p = new URLSearchParams();
@@ -262,11 +264,12 @@ export function ImportPage() {
     queryFn: () =>
       api.get<ApiPage<Video>>(`/api/creators/${idNum}/videos${videoParams ? `?${videoParams}` : ''}`),
     enabled: !isNaN(idNum),
+    placeholderData: keepPreviousData,
   });
 
   const pagedVideos = videosPage?.items ?? [];
   const listTotal = videosPage?.total ?? 0;
-  const totalPages = Math.max(1, Math.ceil(listTotal / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(listTotal / pageSize));
   const selectionScope = useMemo(
     () => JSON.stringify({ creatorId, status, dur, hot, time, q }),
     [creatorId, status, dur, hot, time, q],
@@ -572,7 +575,7 @@ export function ImportPage() {
           </span>
         </h2>
         <span className={s.listHeadMeta}>
-          显示 {listTotal === 0 ? 0 : (pageClamped - 1) * PAGE_SIZE + 1} – {Math.min(pageClamped * PAGE_SIZE, listTotal)} /{' '}
+          显示 {listTotal === 0 ? 0 : (pageClamped - 1) * pageSize + 1} – {Math.min(pageClamped * pageSize, listTotal)} /{' '}
           {listTotal.toLocaleString()} · 按发布时间倒序
         </span>
       </div>
@@ -660,7 +663,23 @@ export function ImportPage() {
       {totalPages > 1 ? (
         <div className={s.pager}>
           <span>
-            共 {totalPages} 页 · 每页 {PAGE_SIZE} 条
+            共 {totalPages} 页 · 每页
+            <Select
+              aria-label="视频每页条数"
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value));
+                setPage(1);
+              }}
+              style={{ width: 76, margin: '0 6px' }}
+            >
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </Select>
+            条
           </span>
           <div className={s.pagerBtns}>
             <button disabled={pageClamped <= 1} onClick={() => setPage(pageClamped - 1)}>

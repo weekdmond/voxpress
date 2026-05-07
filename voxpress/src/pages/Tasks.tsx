@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Page, PageHead } from '@/layouts/AppShell';
-import { Icon } from '@/components/primitives';
+import { Icon, Select } from '@/components/primitives';
 import { TaskChainBar, STAGE_LABEL } from '@/components/Task/TaskChainBar';
 import { TaskCover } from '@/components/Task/TaskCover';
 import { TaskDrawer } from '@/components/Task/TaskDrawer';
@@ -62,7 +62,8 @@ const STAGE_OPTIONS = [
   { v: 'save', label: 'save' },
 ];
 
-const PAGE_SIZE = 20;
+const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZE_OPTIONS = [20, 40, 80, 100];
 
 interface ParsedTaskListParams {
   status: string;
@@ -104,9 +105,14 @@ function parseTaskListParams(raw: string): ParsedTaskListParams {
     model: params.get('model') || 'all',
     since: params.get('since') || 'all',
     q: (params.get('q') || '').trim().toLowerCase(),
-    limit: Math.max(1, Number(params.get('limit') || PAGE_SIZE)),
+    limit: Math.max(1, Number(params.get('limit') || DEFAULT_PAGE_SIZE)),
     offset: Math.max(0, Number(params.get('offset') || 0)),
   };
+}
+
+function parsePageSize(raw: string | null): number {
+  const value = Number(raw || DEFAULT_PAGE_SIZE);
+  return PAGE_SIZE_OPTIONS.includes(value) ? value : DEFAULT_PAGE_SIZE;
 }
 
 function taskMatchesListParams(task: Task, params: ParsedTaskListParams): boolean {
@@ -228,6 +234,7 @@ export function TasksPage() {
   const time = sp.get('time') || 'all';
   const qStr = sp.get('q') || '';
   const page = Math.max(1, Number(sp.get('page') || 1));
+  const pageSize = parsePageSize(sp.get('limit'));
   const [qDraft, setQDraft] = useState(qStr);
   useEffect(() => setQDraft(qStr), [qStr]);
 
@@ -271,19 +278,20 @@ export function TasksPage() {
     if (model !== 'all') p.set('model', model);
     if (time !== 'all') p.set('since', time);
     if (qStr) p.set('q', qStr);
-    p.set('limit', String(PAGE_SIZE));
-    p.set('offset', String((page - 1) * PAGE_SIZE));
+    p.set('limit', String(pageSize));
+    p.set('offset', String((page - 1) * pageSize));
     return p.toString();
-  }, [tab, stage, model, time, qStr, page]);
+  }, [tab, stage, model, time, qStr, page, pageSize]);
 
   const { data: listPage } = useQuery({
     queryKey: ['tasks', 'list', listParams],
     queryFn: () => api.get<ApiPage<Task>>(`/api/tasks?${listParams}`),
     enabled: !isSystem,
+    placeholderData: keepPreviousData,
   });
   const tasks = listPage?.items ?? [];
   const listTotal = listPage?.total ?? tasks.length;
-  const totalPages = Math.max(1, Math.ceil(listTotal / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(listTotal / pageSize));
   const selectionScope = useMemo(
     () => JSON.stringify({ scope, tab, model, stage, time, q: qStr.trim().toLowerCase() }),
     [scope, tab, model, stage, time, qStr],
@@ -295,20 +303,21 @@ export function TasksPage() {
     if (tab !== 'all') p.set('status', tab);
     if (time !== 'all') p.set('since', time);
     if (qStr) p.set('q', qStr);
-    p.set('limit', String(PAGE_SIZE));
-    p.set('offset', String((page - 1) * PAGE_SIZE));
+    p.set('limit', String(pageSize));
+    p.set('offset', String((page - 1) * pageSize));
     return p.toString();
-  }, [tab, time, qStr, page]);
+  }, [tab, time, qStr, page, pageSize]);
 
   const { data: systemPage } = useQuery({
     queryKey: ['system-jobs', 'list', systemParams],
     queryFn: () => api.get<ApiPage<SystemJobRun>>(`/api/system-jobs?${systemParams}`),
     enabled: isSystem,
     refetchInterval: 60_000,
+    placeholderData: keepPreviousData,
   });
   const systemJobs = systemPage?.items ?? [];
   const systemListTotal = systemPage?.total ?? systemJobs.length;
-  const systemTotalPages = Math.max(1, Math.ceil(systemListTotal / PAGE_SIZE));
+  const systemTotalPages = Math.max(1, Math.ceil(systemListTotal / pageSize));
 
   // ─── SSE live updates ────────────────────────────
   useEffect(() => {
@@ -688,7 +697,7 @@ export function TasksPage() {
           </span>
         </h2>
         <span className={s.listHeadMeta}>
-          每页 {PAGE_SIZE} 条 · 第 {page} / {isSystem ? systemTotalPages : totalPages} 页
+          每页 {pageSize} 条 · 第 {page} / {isSystem ? systemTotalPages : totalPages} 页
         </span>
       </div>
 
@@ -876,7 +885,20 @@ export function TasksPage() {
       {pagerShown ? (
         <div className={s.pager}>
           <span>
-            共 {isSystem ? systemTotalPages : totalPages} 页 · 每页 {PAGE_SIZE} 条
+            共 {isSystem ? systemTotalPages : totalPages} 页 · 每页
+            <Select
+              aria-label="任务每页条数"
+              value={pageSize}
+              onChange={(e) => setFilter({ limit: e.target.value, page: null })}
+              style={{ width: 76, margin: '0 6px' }}
+            >
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </Select>
+            条
           </span>
           <div className={s.pagerBtns}>
             <button disabled={page <= 1} onClick={() => setFilter({ page: String(page - 1) })}>

@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Page, PageHead } from '@/layouts/AppShell';
 import { ClaudeShareDialog } from '@/components/ClaudeShare/ClaudeShareDialog';
 import { TaskDrawer } from '@/components/Task/TaskDrawer';
 import { useCrossPageSelection } from '@/hooks/useCrossPageSelection';
-import { Avatar, ConfirmDialog, Icon } from '@/components/primitives';
+import { Avatar, ConfirmDialog, Icon, Select } from '@/components/primitives';
 import { api, apiUrl } from '@/lib/api';
 import {
-  ARTICLE_PAGE_SIZE,
+  ARTICLE_PAGE_SIZE_OPTIONS,
   ARTICLE_SORT_OPTIONS,
   ARTICLE_TIME_OPTIONS,
   DEFAULT_ARTICLE_LIST_STATE,
@@ -153,7 +153,7 @@ export function ArticlesPage() {
   const qc = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const listState = useMemo(() => parseArticleListState(searchParams), [searchParams]);
-  const { creatorFilter, time, tagFilter, topicFilter, sort, q, page } = listState;
+  const { creatorFilter, time, tagFilter, topicFilter, sort, q, page, pageSize } = listState;
   const [qDraft, setQDraft] = useState(q);
   const [openDrop, setOpenDrop] = useState<string | null>(null);
   const [rebuildStage, setRebuildStage] = useState<RebuildStage>('auto');
@@ -210,6 +210,7 @@ export function ArticlesPage() {
   const { data: listPage } = useQuery({
     queryKey: ['articles', listParams],
     queryFn: () => api.get<ApiPage<Article>>(`/api/articles?${listParams}`),
+    placeholderData: keepPreviousData,
   });
   const { data: facets } = useQuery({
     queryKey: ['articles', 'facets', facetParams],
@@ -229,7 +230,7 @@ export function ArticlesPage() {
 
   const articles = listPage?.items ?? [];
   const listTotal = listPage?.total ?? articles.length;
-  const totalPages = Math.max(1, Math.ceil(listTotal / ARTICLE_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(listTotal / pageSize));
   const selectionScope = useMemo(
     () => JSON.stringify({ creatorFilter, time, tagFilter, topicFilter, q, sort }),
     [creatorFilter, time, tagFilter, topicFilter, q, sort],
@@ -620,7 +621,22 @@ export function ArticlesPage() {
       {totalPages > 1 ? (
         <div className={s.pager}>
           <span>
-            共 {totalPages} 页 · 每页 {ARTICLE_PAGE_SIZE} 条
+            共 {totalPages} 页 · 每页
+            <Select
+              aria-label="文章每页条数"
+              value={pageSize}
+              onChange={(e) =>
+                updateListState({ pageSize: Number(e.target.value) }, { resetPage: true })
+              }
+              style={{ width: 76, margin: '0 6px' }}
+            >
+              {ARTICLE_PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </Select>
+            条
           </span>
           <div className={s.pagerBtns}>
             {page <= 1 ? (

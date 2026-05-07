@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useParams } from 'react-router-dom';
 
 type RebuildStage = 'auto' | 'download' | 'transcribe' | 'correct' | 'organize';
@@ -35,7 +35,6 @@ import {
 } from '@/components/Reader/Reader';
 import { api, apiUrl } from '@/lib/api';
 import {
-  ARTICLE_PAGE_SIZE,
   buildArticleListApiParams,
   buildArticleListSearchParams,
   parseArticleListState,
@@ -65,12 +64,13 @@ export function ArticlePage() {
     queryKey: ['articles', listParams],
     queryFn: () => api.get<ApiPage<Article>>(`/api/articles?${listParams}`),
     enabled: hasListContext,
+    placeholderData: keepPreviousData,
   });
 
   const navItems = listPage?.items ?? [];
   const currentIndex = navItems.findIndex((item) => item.id === id);
   const totalItems = listPage?.total ?? navItems.length;
-  const totalPages = Math.max(1, Math.ceil(totalItems / ARTICLE_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(totalItems / listState.pageSize));
   const needsPrevPage = hasListContext && currentIndex === 0 && listState.page > 1;
   const needsNextPage =
     hasListContext &&

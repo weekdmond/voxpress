@@ -13,9 +13,11 @@ export interface ArticleListState {
   sort: ArticleSort;
   q: string;
   page: number;
+  pageSize: number;
 }
 
 export const ARTICLE_PAGE_SIZE = 20;
+export const ARTICLE_PAGE_SIZE_OPTIONS = [20, 40, 80, 100];
 
 export const ARTICLE_TIME_OPTIONS: { v: ArticleTimeFilter; label: string }[] = [
   { v: 'all', label: '全部' },
@@ -42,6 +44,7 @@ export const DEFAULT_ARTICLE_LIST_STATE: ArticleListState = {
   sort: 'published_at:desc',
   q: '',
   page: 1,
+  pageSize: ARTICLE_PAGE_SIZE,
 };
 
 function toParams(input: URLSearchParams | string): URLSearchParams {
@@ -53,6 +56,8 @@ export function parseArticleListState(input: URLSearchParams | string): ArticleL
   const rawTime = params.get('since') as ArticleTimeFilter | null;
   const rawSort = params.get('sort') as ArticleSort | null;
   const rawPage = Number.parseInt(params.get('page') ?? '1', 10);
+  const rawLimit = Number.parseInt(params.get('limit') ?? String(ARTICLE_PAGE_SIZE), 10);
+  const pageSize = ARTICLE_PAGE_SIZE_OPTIONS.includes(rawLimit) ? rawLimit : ARTICLE_PAGE_SIZE;
   return {
     creatorFilter: params.get('creator_id') || DEFAULT_ARTICLE_LIST_STATE.creatorFilter,
     time: rawTime && TIME_SET.has(rawTime) ? rawTime : DEFAULT_ARTICLE_LIST_STATE.time,
@@ -61,6 +66,7 @@ export function parseArticleListState(input: URLSearchParams | string): ArticleL
     sort: rawSort && SORT_SET.has(rawSort) ? rawSort : DEFAULT_ARTICLE_LIST_STATE.sort,
     q: (params.get('q') || '').trim(),
     page: Number.isFinite(rawPage) && rawPage > 0 ? rawPage : DEFAULT_ARTICLE_LIST_STATE.page,
+    pageSize,
   };
 }
 
@@ -87,14 +93,17 @@ export function buildArticleListSearchParams(state: ArticleListState): URLSearch
   if (state.page > 1) {
     params.set('page', String(state.page));
   }
+  if (state.pageSize !== DEFAULT_ARTICLE_LIST_STATE.pageSize) {
+    params.set('limit', String(state.pageSize));
+  }
   return params;
 }
 
 export function buildArticleListApiParams(state: ArticleListState): URLSearchParams {
   const params = buildArticleListSearchParams(state);
   params.set('sort', state.sort);
-  params.set('limit', String(ARTICLE_PAGE_SIZE));
-  params.set('offset', String((state.page - 1) * ARTICLE_PAGE_SIZE));
+  params.set('limit', String(state.pageSize));
+  params.set('offset', String((state.page - 1) * state.pageSize));
   return params;
 }
 
