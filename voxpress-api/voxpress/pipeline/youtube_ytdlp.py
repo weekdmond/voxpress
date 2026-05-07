@@ -33,6 +33,8 @@ class YouTubeChannelInfo:
     channel_id: str
     handle: str
     name: str
+    bio: str | None = None
+    region: str | None = None
     avatar_url: str | None = None
     followers: int = 0
     video_count: int = 0
@@ -303,6 +305,8 @@ def _fetch_channel_videos_with_opts(
         channel_id=channel.channel_id,
         handle=channel.handle,
         name=channel.name,
+        bio=channel.bio,
+        region=channel.region,
         avatar_url=channel.avatar_url,
         followers=channel.followers,
         video_count=max(declared_total or 0, len(videos_by_id), channel.video_count),
@@ -627,10 +631,34 @@ def _channel_from_info(info: dict[str, Any]) -> YouTubeChannelInfo:
         channel_id=channel_id or handle.lstrip("@"),
         handle=handle,
         name=name,
-        avatar_url=info.get("thumbnail"),
+        bio=_clean_channel_description(info.get("description")),
+        region=_clean_channel_region(info),
+        avatar_url=_best_channel_avatar(info),
         followers=int(info.get("channel_follower_count") or 0),
         video_count=int(info.get("playlist_count") or info.get("n_entries") or 0),
     )
+
+
+def _clean_channel_description(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _clean_channel_region(info: dict[str, Any]) -> str | None:
+    text = str(info.get("channel_location") or info.get("location") or "").strip()
+    return text or None
+
+
+def _best_channel_avatar(info: dict[str, Any]) -> str | None:
+    candidates: list[dict[str, Any]] = []
+    for item in info.get("thumbnails") or []:
+        if isinstance(item, dict) and item.get("url"):
+            candidates.append(item)
+    if candidates:
+        selected = max(candidates, key=lambda item: int(item.get("height") or item.get("width") or 0))
+        return str(selected.get("url") or "") or None
+    thumbnail = str(info.get("thumbnail") or "").strip()
+    return thumbnail or None
 
 
 def _derive_handle(url_or_id: str | None, name: str) -> str:

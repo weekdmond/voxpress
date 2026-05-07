@@ -104,6 +104,8 @@ async def upsert_youtube_channel(s: AsyncSession, channel: YouTubeChannelInfo) -
     if existing:
         existing.name = channel.name
         existing.handle = channel.handle
+        existing.bio = channel.bio or existing.bio
+        existing.region = channel.region or existing.region
         existing.avatar_url = channel.avatar_url or existing.avatar_url
         existing.followers = max(existing.followers or 0, channel.followers or 0)
         existing.video_count = max(existing.video_count or 0, channel.video_count or 0)
@@ -114,8 +116,8 @@ async def upsert_youtube_channel(s: AsyncSession, channel: YouTubeChannelInfo) -
         external_id=channel.channel_id,
         handle=channel.handle,
         name=channel.name,
-        bio=None,
-        region=None,
+        bio=channel.bio,
+        region=channel.region,
         avatar_url=channel.avatar_url,
         verified=False,
         followers=channel.followers,

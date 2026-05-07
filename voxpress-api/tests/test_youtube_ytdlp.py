@@ -7,6 +7,7 @@ from voxpress.pipeline.youtube_ytdlp import (
     _channel_tab_urls,
     _channel_videos_url,
     _base_ytdlp_opts,
+    _channel_from_info,
     _looks_like_video_id,
     _parse_compact_count,
     _parse_video_published_at_html,
@@ -57,6 +58,29 @@ def test_parse_video_published_at_html_reads_youtube_publish_date() -> None:
 
     assert published is not None
     assert published.astimezone(timezone.utc).isoformat() == "2026-04-24T11:00:21+00:00"
+
+
+def test_channel_from_info_reads_description_and_best_avatar() -> None:
+    info = {
+        "channel_id": "UC9cfcOuTT9rYkyUimMjLxuw",
+        "channel": "Money or Life 美股频道",
+        "uploader_url": "https://www.youtube.com/@Money_or_Life",
+        "description": "欢迎订阅Money or Life 美股频道",
+        "channel_location": "新加坡",
+        "thumbnails": [
+            {"url": "small.jpg", "height": 88},
+            {"url": "large.jpg", "height": 900},
+        ],
+        "channel_follower_count": 76800,
+        "playlist_count": 249,
+    }
+
+    channel = _channel_from_info(info)
+
+    assert channel.bio == "欢迎订阅Money or Life 美股频道"
+    assert channel.region == "新加坡"
+    assert channel.avatar_url == "large.jpg"
+    assert channel.video_count == 249
 
 
 def test_enrich_video_info_disables_oembed_fallback_for_publish_time(monkeypatch) -> None:
