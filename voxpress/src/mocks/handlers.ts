@@ -54,6 +54,7 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
   if (method === 'GET' && path === '/api/creators') {
     const sort = params.get('sort') ?? 'followers:desc';
     const q = params.get('q')?.toLowerCase() ?? '';
+    const platform = params.get('platform');
     const verified = params.get('verified');
     let items = [...creators];
     if (q) {
@@ -63,6 +64,9 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
           c.handle.toLowerCase().includes(q) ||
           (c.bio ?? '').toLowerCase().includes(q),
       );
+    }
+    if (platform === 'douyin' || platform === 'youtube') {
+      items = items.filter((c) => c.platform === platform);
     }
     if (verified === '1') items = items.filter((c) => c.verified);
     if (sort === 'followers:desc') items.sort((a, b) => b.followers - a.followers);

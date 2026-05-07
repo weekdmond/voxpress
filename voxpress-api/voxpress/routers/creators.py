@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from voxpress.db import get_session
 from voxpress.errors import CreatorNotFound
 from voxpress.models import Article, Creator
-from voxpress.schemas import CreatorOut, Page, ResolveCreatorIn
+from voxpress.schemas import CreatorOut, Page, Platform, ResolveCreatorIn
 from voxpress.url_resolve import normalize_douyin_input
 
 router = APIRouter(prefix="/api/creators", tags=["creators"])
@@ -29,6 +29,7 @@ async def list_creators(
     s: AsyncSession = Depends(get_session),
     sort: str = Query("followers:desc"),
     q: str | None = None,
+    platform: Platform | None = None,
     verified: int | None = None,
     page: int = Query(1, ge=1),
     limit: int = Query(1000, ge=1, le=1000),
@@ -40,6 +41,10 @@ async def list_creators(
     if q:
         like = f"%{q}%"
         predicate = Creator.name.ilike(like) | Creator.handle.ilike(like) | Creator.bio.ilike(like)
+        stmt = stmt.where(predicate)
+        total_stmt = total_stmt.where(predicate)
+    if platform:
+        predicate = Creator.platform == platform
         stmt = stmt.where(predicate)
         total_stmt = total_stmt.where(predicate)
     if verified == 1:

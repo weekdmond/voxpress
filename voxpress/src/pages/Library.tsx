@@ -3,21 +3,37 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Page, PageHead } from '@/layouts/AppShell';
 import { ArtHead, ArtRow, ArtTable } from '@/components/ArtRow/ArtRow';
-import { Avatar, Button, Chip, Icon, Input } from '@/components/primitives';
+import { Avatar, Button, Chip, Icon, Input, Select } from '@/components/primitives';
 import { api } from '@/lib/api';
 import { formatCount, formatRelative } from '@/lib/format';
-import type { Creator, Page as ApiPage } from '@/types/api';
+import type { Creator, Page as ApiPage, Platform } from '@/types/api';
+
+type PlatformFilter = 'all' | Platform;
+
+function platformLabel(platform: Platform): string {
+  return platform === 'youtube' ? 'YouTube' : '抖音';
+}
+
+function PlatformBadge({ platform }: { platform: Platform }) {
+  return (
+    <Chip variant={platform === 'youtube' ? 'danger' : 'accent'} mono>
+      {platformLabel(platform)}
+    </Chip>
+  );
+}
 
 export function LibraryPage() {
   const [q, setQ] = useState('');
+  const [platform, setPlatform] = useState<PlatformFilter>('all');
   const [verifiedOnly, setVerifiedOnly] = useState(false);
   const navigate = useNavigate();
 
   const { data } = useQuery({
-    queryKey: ['creators', { q, verifiedOnly }],
+    queryKey: ['creators', { q, platform, verifiedOnly }],
     queryFn: () => {
       const params = new URLSearchParams({ sort: 'followers:desc' });
       if (q) params.set('q', q);
+      if (platform !== 'all') params.set('platform', platform);
       if (verifiedOnly) params.set('verified', '1');
       return api.get<ApiPage<Creator>>(`/api/creators?${params}`);
     },
@@ -58,6 +74,16 @@ export function LibraryPage() {
         </Chip>
         <Chip>公开视频</Chip>
         <span style={{ flex: 1 }} />
+        <Select
+          aria-label="平台筛选"
+          value={platform}
+          onChange={(e) => setPlatform(e.target.value as PlatformFilter)}
+          style={{ width: 132 }}
+        >
+          <option value="all">全部平台</option>
+          <option value="douyin">抖音</option>
+          <option value="youtube">YouTube</option>
+        </Select>
         <div style={{ width: 280 }}>
           <Input
             leading={<Icon name="search" size={14} />}
@@ -74,6 +100,7 @@ export function LibraryPage() {
       <ArtTable>
         <ArtHead>
           <ArtHead.Cell flex={2}>博主</ArtHead.Cell>
+          <ArtHead.Cell flex={0.75}>平台</ArtHead.Cell>
           <ArtHead.Cell flex={1} align="right">
             受众 ↓
           </ArtHead.Cell>
@@ -112,6 +139,9 @@ export function LibraryPage() {
                 </span>
               </div>
             </ArtRow.T>
+            <ArtRow.C flex={0.75}>
+              <PlatformBadge platform={c.platform} />
+            </ArtRow.C>
             <ArtRow.Num flex={1}>{formatCount(c.followers)}</ArtRow.Num>
             <ArtRow.Num flex={0.7}>{c.article_count}</ArtRow.Num>
             <ArtRow.Num flex={0.7}>{formatCount(c.video_count)}</ArtRow.Num>
