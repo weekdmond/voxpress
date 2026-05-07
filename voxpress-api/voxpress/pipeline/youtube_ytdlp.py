@@ -94,6 +94,10 @@ async def load_youtube_cookie_text() -> str | None:
     return text or None
 
 
+def probe_video_metadata_for_cookie_test(url: str, cookie_text: str) -> YouTubeVideoInfo:
+    return _probe_video_sync(url, cookie_text=cookie_text, allow_oembed_fallback=False, process=False)
+
+
 def _base_ytdlp_opts() -> dict[str, Any]:
     return {
         "quiet": True,
@@ -142,6 +146,7 @@ def _probe_video_sync(
     cookie_text: str | None = None,
     *,
     allow_oembed_fallback: bool = True,
+    process: bool = True,
 ) -> YouTubeVideoInfo:
     import yt_dlp
 
@@ -149,7 +154,7 @@ def _probe_video_sync(
         opts = {**_base_ytdlp_opts(), **cookie_opts, "skip_download": True, "noplaylist": True}
         with yt_dlp.YoutubeDL(opts) as ydl:
             try:
-                info = ydl.extract_info(url, download=False)
+                info = ydl.extract_info(url, download=False, process=process)
             except Exception as exc:  # noqa: BLE001
                 if not allow_oembed_fallback:
                     raise YouTubeExtractError(f"YouTube 视频元数据读取失败:{str(exc)[:200]}") from exc

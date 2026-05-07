@@ -6,6 +6,7 @@ from voxpress.pipeline.youtube_ytdlp import (
     _looks_like_video_id,
     _parse_compact_count,
     _write_youtube_cookie_file,
+    probe_video_metadata_for_cookie_test,
 )
 
 
@@ -81,3 +82,16 @@ def test_write_youtube_cookie_file_converts_cookie_header() -> None:
 
     assert ".youtube.com\tTRUE\t/\tTRUE\t0\tSID\tone" in text
     assert ".youtube.com\tTRUE\t/\tTRUE\t0\tHSID\ttwo" in text
+
+
+def test_cookie_probe_uses_unprocessed_metadata(monkeypatch) -> None:
+    calls: list[bool] = []
+
+    def fake_probe(url: str, cookie_text: str | None = None, *, allow_oembed_fallback: bool = True, process: bool = True):
+        calls.append(process)
+        return object()
+
+    monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp._probe_video_sync", fake_probe)
+
+    assert probe_video_metadata_for_cookie_test("https://www.youtube.com/watch?v=abc", "SID=one")
+    assert calls == [False]

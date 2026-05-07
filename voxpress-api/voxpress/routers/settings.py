@@ -11,7 +11,7 @@ from voxpress.errors import CookieInvalid, CookieMissing, InvalidCookieFile
 from voxpress.creator_sync import fetch_creator_page
 from voxpress.models import Creator, SettingEntry, Video
 from voxpress.pipeline.douyin_video import probe_video_access
-from voxpress.pipeline.youtube_ytdlp import YouTubeExtractError, _probe_video_sync
+from voxpress.pipeline.youtube_ytdlp import YouTubeExtractError, probe_video_metadata_for_cookie_test
 from voxpress.prompts import DEFAULT_CORRECTOR_TEMPLATE
 from voxpress.runtime_settings import (
     build_dashscope_runtime_settings,
@@ -204,15 +204,27 @@ async def test_youtube_cookie(s: AsyncSession = Depends(get_session)) -> dict:
     checked_at = datetime.now(tz=timezone.utc)
     sample_video_url = await _pick_youtube_cookie_test_video(s) or _YOUTUBE_COOKIE_TEST_FALLBACK_VIDEO
     try:
-        video = _probe_video_sync(sample_video_url, cookie_text=cookie_text, allow_oembed_fallback=False)
+        video = probe_video_metadata_for_cookie_test(sample_video_url, cookie_text=cookie_text)
     except YouTubeExtractError as e:
-        await _save_cookie_test_result(s, current, key="youtube_cookie", status="expired", checked_at=checked_at)
+        status = "expired" if _looks_like_youtube_auth_error(str(e)) else "ok"
+        await _save_cookie_test_result(s, current, key="youtube_cookie", status=status, checked_at=checked_at)
         await s.commit()
-        raise CookieInvalid(str(e)) from e
+        if status == "expired":
+            raise CookieInvalid(str(e)) from e
+        return {
+            "status": "ok",
+            "detail": f"YouTube Cookie 已保存；样本元信息探测遇到非登录错误: {str(e)[:160]}",
+        }
     except Exception as e:
-        await _save_cookie_test_result(s, current, key="youtube_cookie", status="expired", checked_at=checked_at)
+        status = "expired" if _looks_like_youtube_auth_error(str(e)) else "ok"
+        await _save_cookie_test_result(s, current, key="youtube_cookie", status=status, checked_at=checked_at)
         await s.commit()
-        raise CookieInvalid(str(e)) from e
+        if status == "expired":
+            raise CookieInvalid(str(e)) from e
+        return {
+            "status": "ok",
+            "detail": f"YouTube Cookie 已保存；样本元信息探测遇到非登录错误: {str(e)[:160]}",
+        }
 
     await _save_cookie_test_result(s, current, key="youtube_cookie", status="ok", checked_at=checked_at)
     await s.commit()
@@ -450,6 +462,24 @@ def _looks_like_cookie_payload(text: str) -> bool:
         return True
     low = normalized.lower()
     return "=" in normalized and (";" in normalized or "sessionid" in low or "ttwid" in low)
+
+
+def _looks_like_youtube_auth_error(message: str) -> bool:
+    low = message.lower()
+    return any(
+        marker in low
+        for marker in (
+            "sign in",
+            "not a bot",
+            "cookies",
+            "cookie",
+            "login",
+            "authentication",
+            "private video",
+            "members-only",
+            "age-restricted",
+        )
+    )
 
 
 def _sanitize_cookie_payload(

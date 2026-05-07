@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from voxpress.routers.settings import (
+    _looks_like_youtube_auth_error,
     _normalize_settings_dict,
     _prepare_settings_value_for_storage,
 )
@@ -74,6 +75,12 @@ def test_prepare_settings_value_for_storage_strips_derived_secret_status_fields(
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "api_key": "sk-db",
     }
+
+
+def test_youtube_cookie_error_classifier_only_marks_auth_errors_expired() -> None:
+    assert _looks_like_youtube_auth_error("Sign in to confirm you’re not a bot")
+    assert _looks_like_youtube_auth_error("Use --cookies for authentication")
+    assert not _looks_like_youtube_auth_error("Requested format is not available")
 
     assert _prepare_settings_value_for_storage(
         "oss",
