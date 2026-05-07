@@ -472,7 +472,7 @@ def _enrich_video_info(
     cookie_text: str | None = None,
 ) -> YouTubeVideoInfo:
     try:
-        enriched = _probe_video_sync(video.source_url, cookie_text=cookie_text)
+        enriched = _probe_video_sync(video.source_url, cookie_text=cookie_text, allow_oembed_fallback=False)
     except Exception:
         scraped_published_at = _scrape_video_published_at(video.source_url, cookie_text=cookie_text)
         if scraped_published_at is None:

@@ -9,6 +9,7 @@ from voxpress.pipeline.youtube_ytdlp import (
     _looks_like_video_id,
     _parse_compact_count,
     _parse_video_published_at_html,
+    _enrich_video_info,
     _write_youtube_cookie_file,
     probe_video_metadata_for_cookie_test,
 )
@@ -55,6 +56,39 @@ def test_parse_video_published_at_html_reads_youtube_publish_date() -> None:
 
     assert published is not None
     assert published.astimezone(timezone.utc).isoformat() == "2026-04-24T11:00:21+00:00"
+
+
+def test_enrich_video_info_disables_oembed_fallback_for_publish_time(monkeypatch) -> None:
+    calls: list[bool] = []
+    channel = YouTubeChannelInfo(channel_id="UC9cfcOuTT9rYkyUimMjLxuw", handle="@Money_or_Life", name="Money")
+    video = YouTubeVideoInfo(
+        id="youtube:MpmwlkfaH8I",
+        external_id="MpmwlkfaH8I",
+        title="Test video",
+        duration_sec=1,
+        plays=0,
+        likes=0,
+        comments=0,
+        cover_url=None,
+        source_url="https://www.youtube.com/watch?v=MpmwlkfaH8I",
+        published_at=datetime(2026, 5, 7, tzinfo=timezone.utc),
+        channel=channel,
+    )
+
+    def fake_probe(_url, cookie_text=None, *, allow_oembed_fallback=True, process=True):
+        calls.append(allow_oembed_fallback)
+        raise RuntimeError("blocked")
+
+    monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp._probe_video_sync", fake_probe)
+    monkeypatch.setattr(
+        "voxpress.pipeline.youtube_ytdlp._scrape_video_published_at",
+        lambda _url, cookie_text=None: datetime(2026, 4, 24, 11, 0, 21, tzinfo=timezone.utc),
+    )
+
+    enriched = _enrich_video_info(video, channel=channel)
+
+    assert calls == [False]
+    assert enriched.published_at.isoformat() == "2026-04-24T11:00:21+00:00"
 
 
 async def test_youtube_extractor_reads_metadata_without_audio_download(monkeypatch) -> None:
