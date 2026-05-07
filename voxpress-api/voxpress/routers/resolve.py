@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from voxpress.auto_tasks import create_auto_tasks_for_videos
 from voxpress.config import settings
-from voxpress.creator_backfill import start_creator_backfill_run
+from voxpress.creator_backfill import schedule_creator_backfill_retry, start_creator_backfill_run
 from voxpress.creator_sync import fetch_creator_page, load_cookie_text, upsert_scraped_page
 from voxpress.db import get_session
 from voxpress.errors import ApiError, InvalidUrl
@@ -122,6 +122,7 @@ async def resolve_link(
 
     backfill_run_id: str | None = None
     backfill_started = False
+    backfill_pending = False
     listed_count = scraped.creator.video_count or 0
     hit_initial_cap = len(scraped.videos) >= settings.creator_import_max_videos
     initial_partial = listed_count > len(scraped.videos) or (
@@ -160,6 +161,8 @@ async def resolve_link(
             backfill_started = True
         except SystemJobAlreadyRunning:
             logger.info("creator backfill skipped: another run is already active")
+            schedule_creator_backfill_retry(creator_id=creator.id, trigger_kind="auto")
+            backfill_pending = True
     logger.info(
         "resolve creator synced creator_id=%s fetched_videos=%d stored_videos=%d elapsed_ms=%d",
         creator.id,
@@ -174,6 +177,7 @@ async def resolve_link(
         "video_count": creator.video_count,
         "fetched_video_count": len(scraped.videos),
         "backfill_started": backfill_started,
+        "backfill_pending": backfill_pending,
         "backfill_run_id": backfill_run_id,
     }
 
@@ -227,14 +231,31 @@ async def _resolve_youtube_link(
         )
     except YouTubeExtractError as e:
         raise ScrapeFailed(str(e), detail={"stage": "youtube_channel_sync"}) from e
+    backfill_run_id: str | None = None
+    backfill_started = False
+    backfill_pending = False
+    if creator.video_count > fetched_count:
+        try:
+            run_id = await start_creator_backfill_run(
+                creator_id=creator.id,
+                trigger_kind="auto",
+                background=True,
+            )
+            backfill_run_id = str(run_id)
+            backfill_started = True
+        except SystemJobAlreadyRunning:
+            logger.info("youtube creator backfill delayed: another run is already active")
+            schedule_creator_backfill_retry(creator_id=creator.id, trigger_kind="auto")
+            backfill_pending = True
     return {
         "kind": "creator",
         "creator_id": creator.id,
         "name": creator.name,
         "video_count": creator.video_count,
         "fetched_video_count": fetched_count,
-        "backfill_started": False,
-        "backfill_run_id": None,
+        "backfill_started": backfill_started,
+        "backfill_pending": backfill_pending,
+        "backfill_run_id": backfill_run_id,
         "auto_task_count": len(task_ids),
     }
 

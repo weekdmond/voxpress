@@ -8,11 +8,13 @@ from uuid import UUID
 
 from sqlalchemy import select
 
+from voxpress.config import settings
 from voxpress.creator_sync import fetch_creator_page, load_cookie_text, upsert_scraped_page
 from voxpress.db import session_scope
 from voxpress.models import Creator
 from voxpress.pipeline.douyin_scraper import ScrapeError
 from voxpress.system_job_store import (
+    SystemJobAlreadyRunning,
     finish_system_job_run,
     start_system_job_run,
     system_job_heartbeat,
@@ -177,6 +179,50 @@ async def start_creator_backfill_run(
         return run_id
     await _execute_run(run_id, target)
     return run_id
+
+
+def schedule_creator_backfill_retry(
+    *,
+    creator_id: int,
+    trigger_kind: str = "auto",
+) -> None:
+    task = asyncio.create_task(
+        _retry_start_creator_backfill_run(creator_id=creator_id, trigger_kind=trigger_kind),
+        name=f"creator-backfill-retry:{creator_id}",
+    )
+    _background_runs.add(task)
+    task.add_done_callback(_background_runs.discard)
+
+
+async def _retry_start_creator_backfill_run(
+    *,
+    creator_id: int,
+    trigger_kind: str,
+) -> None:
+    attempts = settings.creator_backfill_retry_attempts
+    interval = settings.creator_backfill_retry_interval_sec
+    for attempt in range(1, attempts + 1):
+        await asyncio.sleep(interval)
+        try:
+            run_id = await start_creator_backfill_run(
+                creator_id=creator_id,
+                trigger_kind=trigger_kind,
+                background=True,
+            )
+        except SystemJobAlreadyRunning:
+            logger.info(
+                "creator backfill retry waiting: creator_id=%s attempt=%s/%s",
+                creator_id,
+                attempt,
+                attempts,
+            )
+            continue
+        except CreatorBackfillNotFound:
+            logger.info("creator backfill retry cancelled: creator_id=%s not found", creator_id)
+            return
+        logger.info("creator backfill retry started: creator_id=%s run_id=%s", creator_id, run_id)
+        return
+    logger.warning("creator backfill retry exhausted: creator_id=%s attempts=%s", creator_id, attempts)
 
 
 async def cancel_background_backfills() -> None:
