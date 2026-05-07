@@ -30,9 +30,20 @@ export const defaultSettings: Settings = {
     last_tested_at: null,
     source_name: null,
   },
+  youtube_cookie: {
+    status: 'missing',
+    last_tested_at: null,
+    source_name: null,
+  },
   dashscope: {
     configured: true,
     base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  },
+  oss: {
+    configured: true,
+    region: 'cn-hangzhou',
+    endpoint: 'https://oss-cn-hangzhou.aliyuncs.com',
+    bucket: 'voxpress-media',
   },
   storage: {
     audio_retain_days: 7,

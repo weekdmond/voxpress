@@ -5,6 +5,7 @@ from voxpress.pipeline.youtube_ytdlp import (
     _channel_videos_url,
     _looks_like_video_id,
     _parse_compact_count,
+    _write_youtube_cookie_file,
 )
 
 
@@ -69,3 +70,14 @@ async def test_youtube_extractor_requires_audio_download_enabled(monkeypatch) ->
         assert "音频下载已关闭" in str(exc)
     else:
         raise AssertionError("expected YouTubeExtractError")
+
+
+def test_write_youtube_cookie_file_converts_cookie_header() -> None:
+    path = _write_youtube_cookie_file("SID=one; HSID=two")
+    try:
+        text = path.read_text()
+    finally:
+        path.unlink()
+
+    assert ".youtube.com\tTRUE\t/\tTRUE\t0\tSID\tone" in text
+    assert ".youtube.com\tTRUE\t/\tTRUE\t0\tHSID\ttwo" in text

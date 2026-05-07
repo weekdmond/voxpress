@@ -9,7 +9,9 @@ import type { Settings as SettingsT } from '@/types/api';
 export function SettingsPage() {
   const qc = useQueryClient();
   const cookieInputRef = useRef<HTMLInputElement>(null);
+  const youtubeCookieInputRef = useRef<HTMLInputElement>(null);
   const [cookieFile, setCookieFile] = useState<File | null>(null);
+  const [youtubeCookieFile, setYoutubeCookieFile] = useState<File | null>(null);
   const { data: settings } = useQuery({
     queryKey: ['settings'],
     queryFn: () => api.get<SettingsT>('/api/settings'),
@@ -48,6 +50,29 @@ export function SettingsPage() {
     onSettled: async () => {
       setCookieFile(null);
       if (cookieInputRef.current) cookieInputRef.current.value = '';
+      await qc.invalidateQueries({ queryKey: ['settings'] });
+    },
+  });
+
+  const testYoutubeCookie = useMutation({
+    mutationFn: async () => {
+      if (youtubeCookieFile) {
+        const form = new FormData();
+        form.append('file', youtubeCookieFile);
+        await api.postForm('/api/youtube-cookie', form);
+      } else if (!settings?.youtube_cookie.source_name) {
+        throw new Error('请先选择 YouTube cookies.txt 文件');
+      }
+      return api.post<{ status: string; detail?: string }>('/api/youtube-cookie/test');
+    },
+    onSuccess: (r) =>
+      r.status === 'ok'
+        ? toast.success(r.detail ? `YouTube Cookie 测试通过 · ${r.detail}` : 'YouTube Cookie 测试通过')
+        : toast.error('YouTube Cookie 已过期'),
+    onError: (err: Error) => toast.error(err.message || 'YouTube Cookie 测试失败'),
+    onSettled: async () => {
+      setYoutubeCookieFile(null);
+      if (youtubeCookieInputRef.current) youtubeCookieInputRef.current.value = '';
       await qc.invalidateQueries({ queryKey: ['settings'] });
     },
   });
@@ -99,6 +124,14 @@ export function SettingsPage() {
     settings.cookie.status === 'ok' ? (
       <Chip variant="ok">已连接</Chip>
     ) : settings.cookie.status === 'expired' ? (
+      <Chip variant="warn">已过期</Chip>
+    ) : (
+      <Chip variant="warn">未导入</Chip>
+    );
+  const youtubeCookieChip =
+    settings.youtube_cookie.status === 'ok' ? (
+      <Chip variant="ok">已连接</Chip>
+    ) : settings.youtube_cookie.status === 'expired' ? (
       <Chip variant="warn">已过期</Chip>
     ) : (
       <Chip variant="warn">未导入</Chip>
@@ -539,6 +572,74 @@ export function SettingsPage() {
                 onClick={() => testCookie.mutate()}
               >
                 {testCookie.isPending ? '测试中…' : cookieFile ? '导入并测试' : '重新测试'}
+              </Button>
+            </div>
+          </div>
+        </Field>
+      </Box>
+
+      <Box>
+        <Row between>
+          <div>
+            <strong style={{ fontSize: 14 }}>YouTube Cookie</strong>
+            <div style={{ color: 'var(--vp-ink-3)', fontSize: 11.5 }}>
+              yt-dlp 下载受限视频音频时使用
+            </div>
+          </div>
+          {youtubeCookieChip}
+        </Row>
+        <Divider />
+        <Field
+          label="导入 YouTube cookies.txt"
+          help={
+            settings.youtube_cookie.last_tested_at
+              ? `当前文件 ${settings.youtube_cookie.source_name ?? '已导入'} · 上次测试 ${new Date(settings.youtube_cookie.last_tested_at).toLocaleString('zh-CN')}`
+              : settings.youtube_cookie.source_name
+                ? `当前文件 ${settings.youtube_cookie.source_name} · 尚未测试`
+                : '请上传当前 youtube.com / google.com 登录态导出的 Netscape cookies.txt'
+          }
+        >
+          <div style={{ display: 'grid', gap: 10 }}>
+            <input
+              ref={youtubeCookieInputRef}
+              type="file"
+              accept=".txt,text/plain"
+              onChange={(e) => setYoutubeCookieFile(e.target.files?.[0] ?? null)}
+              style={{ display: 'none' }}
+            />
+            <div
+              style={{
+                minHeight: 44,
+                display: 'flex',
+                alignItems: 'center',
+                padding: '0 12px',
+                border: '1px dashed var(--vp-line)',
+                borderRadius: 'var(--vp-radius)',
+                background: 'var(--vp-soft)',
+                color: 'var(--vp-ink-2)',
+                fontFamily: 'var(--vp-font-mono)',
+                fontSize: 12,
+              }}
+            >
+              {youtubeCookieFile
+                ? `已选择 ${youtubeCookieFile.name}`
+                : settings.youtube_cookie.source_name
+                  ? `当前已导入 ${settings.youtube_cookie.source_name}`
+                  : '尚未选择 YouTube cookies.txt 文件'}
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Button onClick={() => youtubeCookieInputRef.current?.click()}>
+                选择 cookies.txt
+              </Button>
+              <Button
+                variant="primary"
+                disabled={
+                  testYoutubeCookie.isPending ||
+                  (!youtubeCookieFile && !settings.youtube_cookie.source_name)
+                }
+                onClick={() => testYoutubeCookie.mutate()}
+              >
+                {testYoutubeCookie.isPending ? '测试中…' : youtubeCookieFile ? '导入并测试' : '重新测试'}
               </Button>
             </div>
           </div>

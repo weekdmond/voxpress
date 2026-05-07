@@ -11,6 +11,7 @@ from voxpress.errors import CookieInvalid, CookieMissing, InvalidCookieFile
 from voxpress.creator_sync import fetch_creator_page
 from voxpress.models import Creator, SettingEntry, Video
 from voxpress.pipeline.douyin_video import probe_video_access
+from voxpress.pipeline.youtube_ytdlp import YouTubeExtractError, _probe_video_sync
 from voxpress.prompts import DEFAULT_CORRECTOR_TEMPLATE
 from voxpress.runtime_settings import (
     build_dashscope_runtime_settings,
@@ -35,6 +36,7 @@ from voxpress.schemas import (
 
 router = APIRouter(prefix="/api", tags=["settings"])
 _COOKIE_TEST_FALLBACK_SEC_UID = "MS4wLjABAAAAT4iFvoTOtlJCDuUMyovtft5NLQOnQZ-HECl7EGe-rT0"
+_YOUTUBE_COOKIE_TEST_FALLBACK_VIDEO = "https://www.youtube.com/watch?v=KJ-efTR7WxM"
 _RECOMMENDED_LLM_MODELS = (
     "qwen3.6-plus",
     "qwen3.6-plus-2026-04-02",
@@ -66,6 +68,7 @@ _DEFAULTS: SettingsOut = SettingsOut(
     prompt=PromptSettings(),
     topic_taxonomy=TopicTaxonomySettings(),
     cookie=CookieSettings(),
+    youtube_cookie=CookieSettings(),
     dashscope=DashScopeSettingsOut(),
     oss=OssSettingsOut(),
     storage=StorageSettings(),
@@ -128,7 +131,11 @@ async def post_cookie(
     if not filename.lower().endswith(".txt"):
         raise InvalidCookieFile("仅支持导入 cookies.txt / .txt 文件")
 
-    text = _sanitize_cookie_payload(_decode_cookie_file(await file.read())).strip()
+    text = _sanitize_cookie_payload(
+        _decode_cookie_file(await file.read()),
+        domains=("douyin.com",),
+        missing_message="上传的 cookies.txt 里没有检测到 douyin.com 的 Cookie。",
+    ).strip()
     if not text:
         raise InvalidCookieFile("cookies.txt 文件为空")
     if not _looks_like_cookie_payload(text):
@@ -147,6 +154,73 @@ async def post_cookie(
     )
     await s.commit()
     return {"status": "ok", "source_name": filename}
+
+
+@router.post("/youtube-cookie")
+async def post_youtube_cookie(
+    file: UploadFile = File(...), s: AsyncSession = Depends(get_session)
+) -> dict:
+    filename = (file.filename or "").strip()
+    if not filename:
+        raise InvalidCookieFile("请选择要导入的 YouTube cookies.txt 文件")
+    if not filename.lower().endswith(".txt"):
+        raise InvalidCookieFile("仅支持导入 cookies.txt / .txt 文件")
+
+    text = _sanitize_cookie_payload(
+        _decode_cookie_file(await file.read()),
+        domains=("youtube.com", "google.com"),
+        missing_message="上传的 cookies.txt 里没有检测到 youtube.com / google.com 的 Cookie。",
+    ).strip()
+    if not text:
+        raise InvalidCookieFile("cookies.txt 文件为空")
+    if not _looks_like_cookie_payload(text):
+        raise InvalidCookieFile("请上传浏览器导出的 cookies.txt 文件")
+
+    existing = await s.get(SettingEntry, "youtube_cookie")
+    current = dict(existing.value) if existing else {}
+    await _save(
+        s,
+        "youtube_cookie",
+        {
+            **current,
+            "text": text,
+            "source_name": filename,
+            "status": "missing",
+            "last_tested_at": None,
+        },
+    )
+    await s.commit()
+    return {"status": "ok", "source_name": filename}
+
+
+@router.post("/youtube-cookie/test")
+async def test_youtube_cookie(s: AsyncSession = Depends(get_session)) -> dict:
+    row = await s.get(SettingEntry, "youtube_cookie")
+    current = dict(row.value) if row else {}
+    cookie_text = str(current.get("text") or "").strip()
+    if not cookie_text:
+        raise CookieMissing("未导入 YouTube Cookie")
+
+    checked_at = datetime.now(tz=timezone.utc)
+    sample_video_url = await _pick_youtube_cookie_test_video(s) or _YOUTUBE_COOKIE_TEST_FALLBACK_VIDEO
+    try:
+        video = _probe_video_sync(sample_video_url, cookie_text=cookie_text, allow_oembed_fallback=False)
+    except YouTubeExtractError as e:
+        await _save_cookie_test_result(s, current, key="youtube_cookie", status="expired", checked_at=checked_at)
+        await s.commit()
+        raise CookieInvalid(str(e)) from e
+    except Exception as e:
+        await _save_cookie_test_result(s, current, key="youtube_cookie", status="expired", checked_at=checked_at)
+        await s.commit()
+        raise CookieInvalid(str(e)) from e
+
+    await _save_cookie_test_result(s, current, key="youtube_cookie", status="ok", checked_at=checked_at)
+    await s.commit()
+    return {
+        "status": "ok",
+        "detail": "YouTube 登录 Cookie 可用于读取视频元数据",
+        "video_sample": video.title,
+    }
 
 
 @router.post("/cookie/test")
@@ -250,6 +324,12 @@ def _normalize_settings_dict(data: dict) -> dict:
     cookie = {**_DEFAULTS.cookie.model_dump(mode="json"), **dict(normalized.get("cookie") or {})}
     normalized["cookie"] = cookie
 
+    youtube_cookie = {
+        **_DEFAULTS.youtube_cookie.model_dump(mode="json"),
+        **dict(normalized.get("youtube_cookie") or {}),
+    }
+    normalized["youtube_cookie"] = youtube_cookie
+
     dashscope = {**_DEFAULTS.dashscope.model_dump(), **dict(normalized.get("dashscope") or {})}
     dashscope_runtime = build_dashscope_runtime_settings(dashscope)
     dashscope["base_url"] = dashscope_runtime.chat_base_url
@@ -317,16 +397,30 @@ async def _pick_cookie_test_video(s: AsyncSession) -> str | None:
     return str(source_url)
 
 
+async def _pick_youtube_cookie_test_video(s: AsyncSession) -> str | None:
+    source_url = await s.scalar(
+        select(Video.source_url)
+        .join(Creator, Creator.id == Video.creator_id)
+        .where(Creator.platform == "youtube")
+        .order_by(Video.published_at.desc(), Video.id.asc())
+        .limit(1)
+    )
+    if source_url is None:
+        return None
+    return str(source_url)
+
+
 async def _save_cookie_test_result(
     s: AsyncSession,
     current: dict,
     *,
+    key: str = "cookie",
     status: str,
     checked_at: datetime,
 ) -> None:
     await _save(
         s,
-        "cookie",
+        key,
         {
             **current,
             "status": status,
@@ -358,7 +452,12 @@ def _looks_like_cookie_payload(text: str) -> bool:
     return "=" in normalized and (";" in normalized or "sessionid" in low or "ttwid" in low)
 
 
-def _sanitize_cookie_payload(text: str) -> str:
+def _sanitize_cookie_payload(
+    text: str,
+    *,
+    domains: tuple[str, ...] = ("douyin.com",),
+    missing_message: str = "上传的 cookies.txt 里没有检测到 douyin.com 的 Cookie。",
+) -> str:
     normalized = text.strip()
     if not normalized:
         return ""
@@ -378,11 +477,11 @@ def _sanitize_cookie_payload(text: str) -> str:
         if len(parts) < 7:
             continue
         domain = parts[0].strip().lower()
-        if "douyin.com" not in domain:
+        if not any(item in domain for item in domains):
             continue
         kept.append(raw)
         saw_cookie_row = True
 
     if not saw_cookie_row:
-        raise InvalidCookieFile("上传的 cookies.txt 里没有检测到 douyin.com 的 Cookie。")
+        raise InvalidCookieFile(missing_message)
     return "\n".join(kept).strip() + "\n"

@@ -22,6 +22,7 @@ def test_normalize_settings_dict_exposes_configured_flags_without_leaking_secret
             "article": {},
             "prompt": {},
             "cookie": {"status": "ok", "text": "cookie-secret"},
+            "youtube_cookie": {"status": "ok", "text": "youtube-cookie-secret"},
             "dashscope": {
                 "api_key": "sk-db",
                 "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -50,6 +51,8 @@ def test_normalize_settings_dict_exposes_configured_flags_without_leaking_secret
 
     assert dumped["cookie"]["status"] == "ok"
     assert "text" not in dumped["cookie"]
+    assert dumped["youtube_cookie"]["status"] == "ok"
+    assert "text" not in dumped["youtube_cookie"]
 
     assert dumped["prompt"]["version"] == DEFAULT_PROMPT_VERSION
     assert dumped["prompt"]["template"] == DEFAULT_ORGANIZER_TEMPLATE.strip()

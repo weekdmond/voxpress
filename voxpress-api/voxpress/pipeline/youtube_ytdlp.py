@@ -3,14 +3,18 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 import httpx
 
 from voxpress.config import settings
+from voxpress.db import session_scope
+from voxpress.models import SettingEntry
 from voxpress.pipeline.protocols import Extractor, ExtractorResult, TranscriptResult
 from voxpress.pipeline.youtube_oembed import fetch_oembed_video
 from voxpress.pipeline.youtube_url import (
@@ -57,23 +61,37 @@ class YouTubeExtractor(Extractor):
 
 
 async def probe_video(url: str) -> YouTubeVideoInfo:
-    return await asyncio.to_thread(_probe_video_sync, url)
+    cookie_text = await load_youtube_cookie_text()
+    return await asyncio.to_thread(_probe_video_sync, url, cookie_text)
 
 
 async def resolve_channel(url: str) -> YouTubeChannelInfo:
-    return await asyncio.to_thread(_resolve_channel_sync, url)
+    cookie_text = await load_youtube_cookie_text()
+    return await asyncio.to_thread(_resolve_channel_sync, url, cookie_text)
 
 
 async def fetch_channel_videos(url: str, *, max_videos: int | None) -> tuple[YouTubeChannelInfo, list[YouTubeVideoInfo]]:
-    return await asyncio.to_thread(_fetch_channel_videos_sync, url, max_videos)
+    cookie_text = await load_youtube_cookie_text()
+    return await asyncio.to_thread(_fetch_channel_videos_sync, url, max_videos, cookie_text)
 
 
 async def fetch_transcript(url: str) -> TranscriptResult | None:
-    return await asyncio.to_thread(_fetch_transcript_sync, url)
+    cookie_text = await load_youtube_cookie_text()
+    return await asyncio.to_thread(_fetch_transcript_sync, url, cookie_text)
 
 
 async def extract_audio(url: str) -> ExtractorResult:
-    return await asyncio.to_thread(_extract_audio_sync, url)
+    cookie_text = await load_youtube_cookie_text()
+    return await asyncio.to_thread(_extract_audio_sync, url, cookie_text)
+
+
+async def load_youtube_cookie_text() -> str | None:
+    async with session_scope() as s:
+        row = await s.get(SettingEntry, "youtube_cookie")
+    if row is None:
+        return None
+    text = str((row.value or {}).get("text") or "").strip()
+    return text or None
 
 
 def _base_ytdlp_opts() -> dict[str, Any]:
@@ -84,63 +102,124 @@ def _base_ytdlp_opts() -> dict[str, Any]:
     }
 
 
-def _probe_video_sync(url: str) -> YouTubeVideoInfo:
+def _write_youtube_cookie_file(cookie_text: str) -> Path:
+    path = Path(tempfile.mkstemp(prefix="vp_youtube_cookies_", suffix=".txt")[1])
+    cookie_text = cookie_text.strip()
+    if cookie_text.startswith("# Netscape") or "\t" in cookie_text:
+        path.write_text(cookie_text)
+        return path
+
+    lines = ["# Netscape HTTP Cookie File"]
+    for pair in cookie_text.split(";"):
+        pair = pair.strip()
+        if not pair or "=" not in pair:
+            continue
+        key, value = pair.split("=", 1)
+        lines.append(f".youtube.com\tTRUE\t/\tTRUE\t0\t{key.strip()}\t{value.strip()}")
+    path.write_text("\n".join(lines))
+    return path
+
+
+@contextmanager
+def _youtube_cookie_opts(cookie_text: str | None) -> Iterator[dict[str, str]]:
+    cookie_path: Path | None = None
+    try:
+        if cookie_text:
+            cookie_path = _write_youtube_cookie_file(cookie_text)
+            yield {"cookiefile": str(cookie_path)}
+        else:
+            yield {}
+    finally:
+        if cookie_path and cookie_path.exists():
+            try:
+                cookie_path.unlink()
+            except OSError:
+                pass
+
+
+def _probe_video_sync(
+    url: str,
+    cookie_text: str | None = None,
+    *,
+    allow_oembed_fallback: bool = True,
+) -> YouTubeVideoInfo:
     import yt_dlp
 
-    opts = {**_base_ytdlp_opts(), "skip_download": True, "noplaylist": True}
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        try:
-            info = ydl.extract_info(url, download=False)
-        except Exception as exc:  # noqa: BLE001
+    with _youtube_cookie_opts(cookie_text) as cookie_opts:
+        opts = {**_base_ytdlp_opts(), **cookie_opts, "skip_download": True, "noplaylist": True}
+        with yt_dlp.YoutubeDL(opts) as ydl:
             try:
-                oembed = asyncio.run(fetch_oembed_video(url))
-            except Exception:
-                raise YouTubeExtractError(f"YouTube 视频元数据读取失败:{str(exc)[:200]}") from exc
-            return YouTubeVideoInfo(
-                id=oembed.video_id,
-                external_id=strip_youtube_video_pk(oembed.video_id),
-                title=oembed.title,
-                duration_sec=0,
-                plays=0,
-                likes=0,
-                comments=0,
-                cover_url=oembed.thumbnail_url,
-                source_url=oembed.source_url,
-                published_at=datetime.now(tz=timezone.utc),
-                channel=YouTubeChannelInfo(
-                    channel_id=oembed.author_url or oembed.author_name,
-                    handle=_derive_handle(oembed.author_url, oembed.author_name),
-                    name=oembed.author_name,
-                ),
-            )
+                info = ydl.extract_info(url, download=False)
+            except Exception as exc:  # noqa: BLE001
+                if not allow_oembed_fallback:
+                    raise YouTubeExtractError(f"YouTube 视频元数据读取失败:{str(exc)[:200]}") from exc
+                try:
+                    oembed = asyncio.run(fetch_oembed_video(url))
+                except Exception:
+                    raise YouTubeExtractError(f"YouTube 视频元数据读取失败:{str(exc)[:200]}") from exc
+                return YouTubeVideoInfo(
+                    id=oembed.video_id,
+                    external_id=strip_youtube_video_pk(oembed.video_id),
+                    title=oembed.title,
+                    duration_sec=0,
+                    plays=0,
+                    likes=0,
+                    comments=0,
+                    cover_url=oembed.thumbnail_url,
+                    source_url=oembed.source_url,
+                    published_at=datetime.now(tz=timezone.utc),
+                    channel=YouTubeChannelInfo(
+                        channel_id=oembed.author_url or oembed.author_name,
+                        handle=_derive_handle(oembed.author_url, oembed.author_name),
+                        name=oembed.author_name,
+                    ),
+                )
     if not isinstance(info, dict):
         raise YouTubeExtractError("YouTube 返回空元数据")
     return _video_from_info(info)
 
 
-def _resolve_channel_sync(url: str) -> YouTubeChannelInfo:
+def _resolve_channel_sync(url: str, cookie_text: str | None = None) -> YouTubeChannelInfo:
     import yt_dlp
 
-    opts = {**_base_ytdlp_opts(), "skip_download": True, "extract_flat": "in_playlist", "playlistend": 1}
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        try:
-            info = ydl.extract_info(url, download=False, process=False)
-        except Exception as exc:  # noqa: BLE001
-            raise YouTubeExtractError(f"YouTube 频道解析失败:{str(exc)[:200]}") from exc
+    with _youtube_cookie_opts(cookie_text) as cookie_opts:
+        opts = {**_base_ytdlp_opts(), **cookie_opts, "skip_download": True, "extract_flat": "in_playlist", "playlistend": 1}
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            try:
+                info = ydl.extract_info(url, download=False, process=False)
+            except Exception as exc:  # noqa: BLE001
+                raise YouTubeExtractError(f"YouTube 频道解析失败:{str(exc)[:200]}") from exc
     if not isinstance(info, dict):
         raise YouTubeExtractError("YouTube 频道返回空元数据")
     return _channel_from_info(info)
 
 
-def _fetch_channel_videos_sync(url: str, max_videos: int | None) -> tuple[YouTubeChannelInfo, list[YouTubeVideoInfo]]:
+def _fetch_channel_videos_sync(
+    url: str,
+    max_videos: int | None,
+    cookie_text: str | None = None,
+) -> tuple[YouTubeChannelInfo, list[YouTubeVideoInfo]]:
     import yt_dlp
 
-    opts = {
-        **_base_ytdlp_opts(),
-        "skip_download": True,
-        "extract_flat": "in_playlist",
-        "playlistend": max_videos,
-    }
+    with _youtube_cookie_opts(cookie_text) as cookie_opts:
+        opts = {
+            **_base_ytdlp_opts(),
+            **cookie_opts,
+            "skip_download": True,
+            "extract_flat": "in_playlist",
+            "playlistend": max_videos,
+        }
+        return _fetch_channel_videos_with_opts(url, max_videos, opts, cookie_text)
+
+
+def _fetch_channel_videos_with_opts(
+    url: str,
+    max_videos: int | None,
+    opts: dict[str, Any],
+    cookie_text: str | None,
+) -> tuple[YouTubeChannelInfo, list[YouTubeVideoInfo]]:
+    import yt_dlp
+
     tab_urls = _channel_tab_urls(url)
     videos_by_id: dict[str, YouTubeVideoInfo] = {}
     channel: YouTubeChannelInfo | None = None
@@ -164,7 +243,7 @@ def _fetch_channel_videos_sync(url: str, max_videos: int | None) -> tuple[YouTub
                     continue
                 active_channel = channel or _channel_from_info(info)
                 flat_video = _video_from_info(entry, channel=active_channel)
-                videos_by_id[video_id] = _enrich_video_info(flat_video, channel=active_channel)
+                videos_by_id[video_id] = _enrich_video_info(flat_video, channel=active_channel, cookie_text=cookie_text)
                 if max_videos is not None and len(videos_by_id) >= max_videos:
                     break
             if max_videos is not None and len(videos_by_id) >= max_videos:
@@ -186,28 +265,30 @@ def _fetch_channel_videos_sync(url: str, max_videos: int | None) -> tuple[YouTub
     return channel, videos
 
 
-def _fetch_transcript_sync(url: str) -> TranscriptResult | None:
+def _fetch_transcript_sync(url: str, cookie_text: str | None = None) -> TranscriptResult | None:
     import yt_dlp
 
     info = resolve_youtube_url(url)
     video_id = info.external_id or "youtube"
     settings.audio_dir.mkdir(parents=True, exist_ok=True)
     subtitle_template = str(settings.audio_dir / f"youtube_{video_id}.%(ext)s")
-    opts = {
-        **_base_ytdlp_opts(),
-        "skip_download": True,
-        "noplaylist": True,
-        "writesubtitles": True,
-        "writeautomaticsub": True,
-        "subtitleslangs": ["zh-Hans", "zh-CN", "zh", "en"],
-        "subtitlesformat": "json3/vtt/best",
-        "outtmpl": {"default": subtitle_template},
-    }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        try:
-            ydl.extract_info(url, download=True)
-        except Exception:
-            return None
+    with _youtube_cookie_opts(cookie_text) as cookie_opts:
+        opts = {
+            **_base_ytdlp_opts(),
+            **cookie_opts,
+            "skip_download": True,
+            "noplaylist": True,
+            "writesubtitles": True,
+            "writeautomaticsub": True,
+            "subtitleslangs": ["zh-Hans", "zh-CN", "zh", "en"],
+            "subtitlesformat": "json3/vtt/best",
+            "outtmpl": {"default": subtitle_template},
+        }
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            try:
+                ydl.extract_info(url, download=True)
+            except Exception:
+                return None
 
     candidates = sorted(settings.audio_dir.glob(f"youtube_{video_id}.*"))
     for candidate in candidates:
@@ -222,7 +303,7 @@ def _fetch_transcript_sync(url: str) -> TranscriptResult | None:
     return None
 
 
-def _extract_audio_sync(url: str) -> ExtractorResult:
+def _extract_audio_sync(url: str, cookie_text: str | None = None) -> ExtractorResult:
     import yt_dlp
 
     settings.audio_dir.mkdir(parents=True, exist_ok=True)
@@ -230,22 +311,24 @@ def _extract_audio_sync(url: str) -> ExtractorResult:
     info = resolve_youtube_url(url)
     external_id = info.external_id or "%(id)s"
     out_template = str(settings.video_dir / f"youtube_{external_id}.%(ext)s")
-    opts = {
-        **_base_ytdlp_opts(),
-        "format": "bestaudio/best",
-        "outtmpl": out_template,
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "postprocessors": [
-            {"key": "FFmpegExtractAudio", "preferredcodec": "m4a", "preferredquality": "0"},
-        ],
-    }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        try:
-            raw = ydl.extract_info(url, download=True)
-        except Exception as exc:  # noqa: BLE001
-            raise YouTubeExtractError(f"YouTube 音频下载失败:{str(exc)[:200]}") from exc
+    with _youtube_cookie_opts(cookie_text) as cookie_opts:
+        opts = {
+            **_base_ytdlp_opts(),
+            **cookie_opts,
+            "format": "bestaudio/best",
+            "outtmpl": out_template,
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "postprocessors": [
+                {"key": "FFmpegExtractAudio", "preferredcodec": "m4a", "preferredquality": "0"},
+            ],
+        }
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            try:
+                raw = ydl.extract_info(url, download=True)
+            except Exception as exc:  # noqa: BLE001
+                raise YouTubeExtractError(f"YouTube 音频下载失败:{str(exc)[:200]}") from exc
     if not isinstance(raw, dict):
         raise YouTubeExtractError("YouTube 音频下载返回空元数据")
     video = _video_from_info(raw)
@@ -377,9 +460,14 @@ def _parse_compact_count(raw: str) -> int:
         return 0
 
 
-def _enrich_video_info(video: YouTubeVideoInfo, *, channel: YouTubeChannelInfo) -> YouTubeVideoInfo:
+def _enrich_video_info(
+    video: YouTubeVideoInfo,
+    *,
+    channel: YouTubeChannelInfo,
+    cookie_text: str | None = None,
+) -> YouTubeVideoInfo:
     try:
-        enriched = _probe_video_sync(video.source_url)
+        enriched = _probe_video_sync(video.source_url, cookie_text=cookie_text)
     except Exception:
         return video
     return YouTubeVideoInfo(

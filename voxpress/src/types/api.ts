@@ -332,10 +332,21 @@ export interface Settings {
     last_tested_at: ISO8601 | null;
     source_name: string | null;
   };
+  youtube_cookie: {
+    status: 'missing' | 'ok' | 'expired';
+    last_tested_at: ISO8601 | null;
+    source_name: string | null;
+  };
   dashscope: {
     configured?: boolean;
     base_url: string;
     api_key?: string | null;
+  };
+  oss: {
+    configured?: boolean;
+    region: string | null;
+    endpoint: string | null;
+    bucket: string | null;
   };
   storage: {
     audio_retain_days: number;

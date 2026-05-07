@@ -419,6 +419,36 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
     return delay({ status: 'ok', detail: '创作者主页抓取和视频读取都通过' });
   }
 
+  if (method === 'POST' && path === '/api/youtube-cookie') {
+    let sourceName = 'youtube-cookies.txt';
+    if (typeof FormData !== 'undefined' && body instanceof FormData) {
+      const file = body.get('file');
+      if (typeof File !== 'undefined' && file instanceof File) sourceName = file.name;
+    }
+    settings = deepMerge(settings, {
+      youtube_cookie: {
+        status: 'ok',
+        source_name: sourceName,
+        last_tested_at: settings.youtube_cookie.last_tested_at,
+      },
+    });
+    return delay({ status: 'ok', source_name: sourceName });
+  }
+
+  if (method === 'POST' && path === '/api/youtube-cookie/test') {
+    if (settings.youtube_cookie.status === 'missing') {
+      throw apiError('cookie_missing', '未导入 YouTube Cookie', 403);
+    }
+    settings = deepMerge(settings, {
+      youtube_cookie: {
+        status: 'ok',
+        source_name: settings.youtube_cookie.source_name,
+        last_tested_at: new Date().toISOString(),
+      },
+    });
+    return delay({ status: 'ok', detail: 'YouTube 登录 Cookie 可用于读取视频元数据' });
+  }
+
   if (method === 'GET' && path === '/api/models') {
     return delay(availableModels);
   }

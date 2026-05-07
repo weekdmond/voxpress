@@ -518,6 +518,7 @@ class SettingsOut(BaseModel):
     prompt: PromptSettings
     topic_taxonomy: TopicTaxonomySettings
     cookie: CookieSettings
+    youtube_cookie: CookieSettings
     dashscope: DashScopeSettingsOut
     oss: OssSettingsOut
     storage: StorageSettings
@@ -531,6 +532,7 @@ class SettingsPatch(BaseModel):
     prompt: PromptSettingsPatch | None = None
     topic_taxonomy: TopicTaxonomySettingsPatch | None = None
     cookie: CookieSettings | None = None
+    youtube_cookie: CookieSettings | None = None
     dashscope: DashScopeSettingsPatch | None = None
     oss: OssSettingsPatch | None = None
     storage: StorageSettings | None = None
