@@ -32,6 +32,7 @@ from voxpress.schemas import (
     StorageSettings,
     TopicTaxonomySettings,
     WhisperSettings,
+    YouTubeProxySettings,
 )
 
 router = APIRouter(prefix="/api", tags=["settings"])
@@ -69,6 +70,7 @@ _DEFAULTS: SettingsOut = SettingsOut(
     topic_taxonomy=TopicTaxonomySettings(),
     cookie=CookieSettings(),
     youtube_cookie=CookieSettings(),
+    youtube_proxy=YouTubeProxySettings(),
     dashscope=DashScopeSettingsOut(),
     oss=OssSettingsOut(),
     storage=StorageSettings(),
@@ -204,7 +206,7 @@ async def test_youtube_cookie(s: AsyncSession = Depends(get_session)) -> dict:
     checked_at = datetime.now(tz=timezone.utc)
     sample_video_url = await _pick_youtube_cookie_test_video(s) or _YOUTUBE_COOKIE_TEST_FALLBACK_VIDEO
     try:
-        video = probe_video_metadata_for_cookie_test(sample_video_url, cookie_text=cookie_text)
+        video = await probe_video_metadata_for_cookie_test(sample_video_url, cookie_text=cookie_text)
     except YouTubeExtractError as e:
         status = "expired" if _looks_like_youtube_auth_error(str(e)) else "ok"
         await _save_cookie_test_result(s, current, key="youtube_cookie", status=status, checked_at=checked_at)
@@ -341,6 +343,13 @@ def _normalize_settings_dict(data: dict) -> dict:
         **dict(normalized.get("youtube_cookie") or {}),
     }
     normalized["youtube_cookie"] = youtube_cookie
+
+    youtube_proxy = {
+        **_DEFAULTS.youtube_proxy.model_dump(mode="json"),
+        **dict(normalized.get("youtube_proxy") or {}),
+    }
+    youtube_proxy["url"] = str(youtube_proxy.get("url") or "").strip()
+    normalized["youtube_proxy"] = youtube_proxy
 
     dashscope = {**_DEFAULTS.dashscope.model_dump(), **dict(normalized.get("dashscope") or {})}
     dashscope_runtime = build_dashscope_runtime_settings(dashscope)

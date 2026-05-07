@@ -6,6 +6,7 @@ from voxpress.pipeline.youtube_ytdlp import (
     YouTubeVideoInfo,
     _channel_tab_urls,
     _channel_videos_url,
+    _base_ytdlp_opts,
     _looks_like_video_id,
     _parse_compact_count,
     _parse_video_published_at_html,
@@ -75,14 +76,14 @@ def test_enrich_video_info_disables_oembed_fallback_for_publish_time(monkeypatch
         channel=channel,
     )
 
-    def fake_probe(_url, cookie_text=None, *, allow_oembed_fallback=True, process=True):
+    def fake_probe(_url, cookie_text=None, *, allow_oembed_fallback=True, process=True, proxy_url=None):
         calls.append(allow_oembed_fallback)
         raise RuntimeError("blocked")
 
     monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp._probe_video_sync", fake_probe)
     monkeypatch.setattr(
         "voxpress.pipeline.youtube_ytdlp._scrape_video_published_at",
-        lambda _url, cookie_text=None: datetime(2026, 4, 24, 11, 0, 21, tzinfo=timezone.utc),
+        lambda _url, cookie_text=None, proxy_url=None: datetime(2026, 4, 24, 11, 0, 21, tzinfo=timezone.utc),
     )
 
     enriched = _enrich_video_info(video, channel=channel)
@@ -136,14 +137,30 @@ def test_write_youtube_cookie_file_converts_cookie_header() -> None:
     assert ".youtube.com\tTRUE\t/\tTRUE\t0\tHSID\ttwo" in text
 
 
-def test_cookie_probe_uses_unprocessed_metadata(monkeypatch) -> None:
+def test_base_ytdlp_opts_includes_proxy_when_configured() -> None:
+    assert _base_ytdlp_opts("socks5://127.0.0.1:1080")["proxy"] == "socks5://127.0.0.1:1080"
+    assert "proxy" not in _base_ytdlp_opts("")
+
+
+async def test_cookie_probe_uses_unprocessed_metadata(monkeypatch) -> None:
     calls: list[bool] = []
 
-    def fake_probe(url: str, cookie_text: str | None = None, *, allow_oembed_fallback: bool = True, process: bool = True):
+    def fake_probe(
+        url: str,
+        cookie_text: str | None = None,
+        *,
+        allow_oembed_fallback: bool = True,
+        process: bool = True,
+        proxy_url: str | None = None,
+    ):
         calls.append(process)
         return object()
 
-    monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp._probe_video_sync", fake_probe)
+    async def fake_proxy_url():
+        return None
 
-    assert probe_video_metadata_for_cookie_test("https://www.youtube.com/watch?v=abc", "SID=one")
+    monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp._probe_video_sync", fake_probe)
+    monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp.load_youtube_proxy_url", fake_proxy_url)
+
+    assert await probe_video_metadata_for_cookie_test("https://www.youtube.com/watch?v=abc", "SID=one")
     assert calls == [False]

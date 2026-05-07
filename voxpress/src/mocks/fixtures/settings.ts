@@ -35,6 +35,9 @@ export const defaultSettings: Settings = {
     last_tested_at: null,
     source_name: null,
   },
+  youtube_proxy: {
+    url: '',
+  },
   dashscope: {
     configured: true,
     base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',

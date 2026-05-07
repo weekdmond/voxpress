@@ -480,6 +480,10 @@ class CookieSettings(BaseModel):
     source_name: str | None = None
 
 
+class YouTubeProxySettings(BaseModel):
+    url: str = ""
+
+
 class DashScopeSettingsOut(BaseModel):
     configured: bool = False
     base_url: str = Field(default_factory=lambda: app_settings.dashscope_compatible_base_url)
@@ -519,6 +523,7 @@ class SettingsOut(BaseModel):
     topic_taxonomy: TopicTaxonomySettings
     cookie: CookieSettings
     youtube_cookie: CookieSettings
+    youtube_proxy: YouTubeProxySettings
     dashscope: DashScopeSettingsOut
     oss: OssSettingsOut
     storage: StorageSettings
@@ -533,6 +538,7 @@ class SettingsPatch(BaseModel):
     topic_taxonomy: TopicTaxonomySettingsPatch | None = None
     cookie: CookieSettings | None = None
     youtube_cookie: CookieSettings | None = None
+    youtube_proxy: YouTubeProxySettings | None = None
     dashscope: DashScopeSettingsPatch | None = None
     oss: OssSettingsPatch | None = None
     storage: StorageSettings | None = None

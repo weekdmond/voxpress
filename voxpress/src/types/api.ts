@@ -337,6 +337,9 @@ export interface Settings {
     last_tested_at: ISO8601 | null;
     source_name: string | null;
   };
+  youtube_proxy: {
+    url: string;
+  };
   dashscope: {
     configured?: boolean;
     base_url: string;

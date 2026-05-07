@@ -62,27 +62,41 @@ class YouTubeExtractor(Extractor):
 
 async def probe_video(url: str) -> YouTubeVideoInfo:
     cookie_text = await load_youtube_cookie_text()
-    return await asyncio.to_thread(_probe_video_sync, url, cookie_text)
+    proxy_url = await load_youtube_proxy_url()
+    return await asyncio.to_thread(_probe_video_sync, url, cookie_text, proxy_url=proxy_url)
 
 
 async def resolve_channel(url: str) -> YouTubeChannelInfo:
     cookie_text = await load_youtube_cookie_text()
-    return await asyncio.to_thread(_resolve_channel_sync, url, cookie_text)
+    proxy_url = await load_youtube_proxy_url()
+    return await asyncio.to_thread(_resolve_channel_sync, url, cookie_text, proxy_url)
 
 
 async def fetch_channel_videos(url: str, *, max_videos: int | None) -> tuple[YouTubeChannelInfo, list[YouTubeVideoInfo]]:
     cookie_text = await load_youtube_cookie_text()
-    return await asyncio.to_thread(_fetch_channel_videos_sync, url, max_videos, cookie_text)
+    proxy_url = await load_youtube_proxy_url()
+    return await asyncio.to_thread(_fetch_channel_videos_sync, url, max_videos, cookie_text, proxy_url)
 
 
 async def fetch_transcript(url: str) -> TranscriptResult | None:
     cookie_text = await load_youtube_cookie_text()
-    return await asyncio.to_thread(_fetch_transcript_sync, url, cookie_text)
+    proxy_url = await load_youtube_proxy_url()
+    return await asyncio.to_thread(_fetch_transcript_sync, url, cookie_text, proxy_url)
 
 
 async def extract_audio(url: str) -> ExtractorResult:
     cookie_text = await load_youtube_cookie_text()
-    return await asyncio.to_thread(_extract_audio_sync, url, cookie_text)
+    proxy_url = await load_youtube_proxy_url()
+    return await asyncio.to_thread(_extract_audio_sync, url, cookie_text, proxy_url)
+
+
+async def load_youtube_proxy_url() -> str | None:
+    async with session_scope() as s:
+        row = await s.get(SettingEntry, "youtube_proxy")
+    if row is None:
+        return None
+    proxy_url = str((row.value or {}).get("url") or "").strip()
+    return proxy_url or None
 
 
 async def load_youtube_cookie_text() -> str | None:
@@ -94,16 +108,27 @@ async def load_youtube_cookie_text() -> str | None:
     return text or None
 
 
-def probe_video_metadata_for_cookie_test(url: str, cookie_text: str) -> YouTubeVideoInfo:
-    return _probe_video_sync(url, cookie_text=cookie_text, allow_oembed_fallback=False, process=False)
+async def probe_video_metadata_for_cookie_test(url: str, cookie_text: str) -> YouTubeVideoInfo:
+    proxy_url = await load_youtube_proxy_url()
+    return await asyncio.to_thread(
+        _probe_video_sync,
+        url,
+        cookie_text,
+        allow_oembed_fallback=False,
+        process=False,
+        proxy_url=proxy_url,
+    )
 
 
-def _base_ytdlp_opts() -> dict[str, Any]:
-    return {
+def _base_ytdlp_opts(proxy_url: str | None = None) -> dict[str, Any]:
+    opts: dict[str, Any] = {
         "quiet": True,
         "no_warnings": True,
         "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
     }
+    if proxy_url:
+        opts["proxy"] = proxy_url
+    return opts
 
 
 def _write_youtube_cookie_file(cookie_text: str) -> Path:
@@ -147,11 +172,12 @@ def _probe_video_sync(
     *,
     allow_oembed_fallback: bool = True,
     process: bool = True,
+    proxy_url: str | None = None,
 ) -> YouTubeVideoInfo:
     import yt_dlp
 
     with _youtube_cookie_opts(cookie_text) as cookie_opts:
-        opts = {**_base_ytdlp_opts(), **cookie_opts, "skip_download": True, "noplaylist": True}
+        opts = {**_base_ytdlp_opts(proxy_url), **cookie_opts, "skip_download": True, "noplaylist": True}
         with yt_dlp.YoutubeDL(opts) as ydl:
             try:
                 info = ydl.extract_info(url, download=False, process=process)
@@ -184,11 +210,21 @@ def _probe_video_sync(
     return _video_from_info(info)
 
 
-def _resolve_channel_sync(url: str, cookie_text: str | None = None) -> YouTubeChannelInfo:
+def _resolve_channel_sync(
+    url: str,
+    cookie_text: str | None = None,
+    proxy_url: str | None = None,
+) -> YouTubeChannelInfo:
     import yt_dlp
 
     with _youtube_cookie_opts(cookie_text) as cookie_opts:
-        opts = {**_base_ytdlp_opts(), **cookie_opts, "skip_download": True, "extract_flat": "in_playlist", "playlistend": 1}
+        opts = {
+            **_base_ytdlp_opts(proxy_url),
+            **cookie_opts,
+            "skip_download": True,
+            "extract_flat": "in_playlist",
+            "playlistend": 1,
+        }
         with yt_dlp.YoutubeDL(opts) as ydl:
             try:
                 info = ydl.extract_info(url, download=False, process=False)
@@ -203,18 +239,19 @@ def _fetch_channel_videos_sync(
     url: str,
     max_videos: int | None,
     cookie_text: str | None = None,
+    proxy_url: str | None = None,
 ) -> tuple[YouTubeChannelInfo, list[YouTubeVideoInfo]]:
     import yt_dlp
 
     with _youtube_cookie_opts(cookie_text) as cookie_opts:
         opts = {
-            **_base_ytdlp_opts(),
+            **_base_ytdlp_opts(proxy_url),
             **cookie_opts,
             "skip_download": True,
             "extract_flat": "in_playlist",
             "playlistend": max_videos,
         }
-        return _fetch_channel_videos_with_opts(url, max_videos, opts, cookie_text)
+        return _fetch_channel_videos_with_opts(url, max_videos, opts, cookie_text, proxy_url)
 
 
 def _fetch_channel_videos_with_opts(
@@ -222,6 +259,7 @@ def _fetch_channel_videos_with_opts(
     max_videos: int | None,
     opts: dict[str, Any],
     cookie_text: str | None,
+    proxy_url: str | None,
 ) -> tuple[YouTubeChannelInfo, list[YouTubeVideoInfo]]:
     import yt_dlp
 
@@ -248,7 +286,12 @@ def _fetch_channel_videos_with_opts(
                     continue
                 active_channel = channel or _channel_from_info(info)
                 flat_video = _video_from_info(entry, channel=active_channel)
-                videos_by_id[video_id] = _enrich_video_info(flat_video, channel=active_channel, cookie_text=cookie_text)
+                videos_by_id[video_id] = _enrich_video_info(
+                    flat_video,
+                    channel=active_channel,
+                    cookie_text=cookie_text,
+                    proxy_url=proxy_url,
+                )
                 if max_videos is not None and len(videos_by_id) >= max_videos:
                     break
             if max_videos is not None and len(videos_by_id) >= max_videos:
@@ -270,7 +313,11 @@ def _fetch_channel_videos_with_opts(
     return channel, videos
 
 
-def _fetch_transcript_sync(url: str, cookie_text: str | None = None) -> TranscriptResult | None:
+def _fetch_transcript_sync(
+    url: str,
+    cookie_text: str | None = None,
+    proxy_url: str | None = None,
+) -> TranscriptResult | None:
     import yt_dlp
 
     info = resolve_youtube_url(url)
@@ -279,7 +326,7 @@ def _fetch_transcript_sync(url: str, cookie_text: str | None = None) -> Transcri
     subtitle_template = str(settings.audio_dir / f"youtube_{video_id}.%(ext)s")
     with _youtube_cookie_opts(cookie_text) as cookie_opts:
         opts = {
-            **_base_ytdlp_opts(),
+            **_base_ytdlp_opts(proxy_url),
             **cookie_opts,
             "skip_download": True,
             "noplaylist": True,
@@ -308,7 +355,11 @@ def _fetch_transcript_sync(url: str, cookie_text: str | None = None) -> Transcri
     return None
 
 
-def _extract_audio_sync(url: str, cookie_text: str | None = None) -> ExtractorResult:
+def _extract_audio_sync(
+    url: str,
+    cookie_text: str | None = None,
+    proxy_url: str | None = None,
+) -> ExtractorResult:
     import yt_dlp
 
     settings.audio_dir.mkdir(parents=True, exist_ok=True)
@@ -318,7 +369,7 @@ def _extract_audio_sync(url: str, cookie_text: str | None = None) -> ExtractorRe
     out_template = str(settings.video_dir / f"youtube_{external_id}.%(ext)s")
     with _youtube_cookie_opts(cookie_text) as cookie_opts:
         opts = {
-            **_base_ytdlp_opts(),
+            **_base_ytdlp_opts(proxy_url),
             **cookie_opts,
             "format": "bestaudio/best",
             "outtmpl": out_template,
@@ -470,11 +521,21 @@ def _enrich_video_info(
     *,
     channel: YouTubeChannelInfo,
     cookie_text: str | None = None,
+    proxy_url: str | None = None,
 ) -> YouTubeVideoInfo:
     try:
-        enriched = _probe_video_sync(video.source_url, cookie_text=cookie_text, allow_oembed_fallback=False)
+        enriched = _probe_video_sync(
+            video.source_url,
+            cookie_text=cookie_text,
+            allow_oembed_fallback=False,
+            proxy_url=proxy_url,
+        )
     except Exception:
-        scraped_published_at = _scrape_video_published_at(video.source_url, cookie_text=cookie_text)
+        scraped_published_at = _scrape_video_published_at(
+            video.source_url,
+            cookie_text=cookie_text,
+            proxy_url=proxy_url,
+        )
         if scraped_published_at is None:
             return video
         return YouTubeVideoInfo(
@@ -505,7 +566,11 @@ def _enrich_video_info(
     )
 
 
-def _scrape_video_published_at(url: str, cookie_text: str | None = None) -> datetime | None:
+def _scrape_video_published_at(
+    url: str,
+    cookie_text: str | None = None,
+    proxy_url: str | None = None,
+) -> datetime | None:
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -516,7 +581,13 @@ def _scrape_video_published_at(url: str, cookie_text: str | None = None) -> date
     if cookie_text:
         headers["Cookie"] = cookie_text.strip()
     try:
-        with httpx.Client(timeout=15, follow_redirects=True, headers=headers, trust_env=False) as client:
+        with httpx.Client(
+            timeout=15,
+            follow_redirects=True,
+            headers=headers,
+            trust_env=False,
+            proxy=proxy_url,
+        ) as client:
             html = client.get(url).text
     except Exception:
         return None

@@ -81,12 +81,14 @@ export function SettingsPage() {
   const [correctorDraft, setCorrectorDraft] = useState('');
   const [dashscopeBaseUrlDraft, setDashscopeBaseUrlDraft] = useState('');
   const [dashscopeApiKeyDraft, setDashscopeApiKeyDraft] = useState('');
+  const [youtubeProxyDraft, setYoutubeProxyDraft] = useState('');
   useEffect(() => {
     if (!settings) return;
     setPromptDraft(settings.prompt.template);
     setCorrectorDraft(settings.corrector.template);
     setDashscopeBaseUrlDraft(settings.dashscope.base_url);
     setDashscopeApiKeyDraft('');
+    setYoutubeProxyDraft(settings.youtube_proxy.url);
   }, [settings]);
 
   const exportSettings = () => {
@@ -143,6 +145,7 @@ export function SettingsPage() {
   );
   const dashscopeDirty =
     dashscopeBaseUrlDraft !== settings.dashscope.base_url || dashscopeApiKeyDraft.trim().length > 0;
+  const youtubeProxyDirty = youtubeProxyDraft.trim() !== settings.youtube_proxy.url;
   const llmModelSuggestions = Array.from(new Set([settings.llm.model, ...(models?.llm ?? [])]));
   const whisperModelSuggestions = Array.from(new Set([settings.whisper.model, ...(models?.transcribe ?? [])]));
   const correctorModelSuggestions = Array.from(new Set([settings.corrector.model, ...(models?.corrector ?? [])]));
@@ -642,6 +645,28 @@ export function SettingsPage() {
                 {testYoutubeCookie.isPending ? '测试中…' : youtubeCookieFile ? '导入并测试' : '重新测试'}
               </Button>
             </div>
+          </div>
+        </Field>
+        <Divider />
+        <Field
+          label="YouTube Proxy"
+          help="可填 http://host:port、socks5://host:port，或带账号密码的代理；留空则使用服务器默认出口"
+        >
+          <Input
+            value={youtubeProxyDraft}
+            placeholder="socks5://127.0.0.1:1080"
+            onChange={(e) => setYoutubeProxyDraft(e.target.value)}
+            mono
+          />
+          <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+            <Button onClick={() => setYoutubeProxyDraft(settings.youtube_proxy.url)}>恢复当前</Button>
+            <Button
+              variant={youtubeProxyDirty ? 'primary' : 'default'}
+              disabled={!youtubeProxyDirty || patch.isPending}
+              onClick={() => patch.mutate({ youtube_proxy: { url: youtubeProxyDraft.trim() } })}
+            >
+              保存代理
+            </Button>
           </div>
         </Field>
       </Box>
