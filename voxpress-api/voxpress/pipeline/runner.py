@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -247,6 +248,8 @@ class TaskRunner:
             from voxpress.pipeline.douyin_video import _extract_audio
 
             await _extract_audio(video_path, audio_path)
+            with contextlib.suppress(OSError):
+                video_path.unlink()
             return audio_path
 
         if ctx.creator.platform == "youtube":
@@ -291,14 +294,17 @@ class TaskRunner:
                 raise RuntimeError("YouTube 视频没有可用字幕，且当前已关闭音频转写")
 
         audio_path = await self.prepare_audio(task_id)
-        if await media_store.is_enabled() and not ctx.video.audio_object_key and audio_path.exists():
+        if not ctx.video.audio_object_key and audio_path.exists():
+            if not await media_store.is_enabled():
+                raise MediaStoreError("OSS 未配置，无法保存转写音频")
             try:
                 object_key = await media_store.upload_file(
                     audio_path,
-                    object_key=audio_object_key(ctx.video.id, audio_path),
+                    object_key=audio_object_key(ctx.video.id, audio_path, platform=ctx.creator.platform),
                 )
             except MediaStoreError as exc:
                 logger.warning("archive audio before transcribe failed for %s: %s", ctx.video.id, exc)
+                raise
             else:
                 if object_key:
                     async with session_scope() as s:
@@ -308,11 +314,16 @@ class TaskRunner:
         transcriber = await self._transcriber_backend()
         language = await self.current_whisper_language()
         initial_prompt = await self.build_initial_prompt(task_id)
-        return await transcriber.transcribe(
-            audio_path,
-            language=language,
-            initial_prompt=initial_prompt,
-        )
+        try:
+            return await transcriber.transcribe(
+                audio_path,
+                language=language,
+                initial_prompt=initial_prompt,
+            )
+        finally:
+            if await media_store.is_enabled() and audio_path.exists():
+                with contextlib.suppress(OSError):
+                    audio_path.unlink()
 
     async def build_initial_prompt(self, task_id: UUID) -> str | None:
         if not await self.enable_initial_prompt():
@@ -468,28 +479,37 @@ class TaskRunner:
         return await self._save_article(meta=meta, transcript=transcript, organized=organized)
 
     async def _archive_media(self, meta: ExtractorResult) -> None:
-        if not await media_store.is_enabled():
+        media_paths = [path for path in [meta.video_path, meta.audio_path] if path and path.exists()]
+        if not media_paths:
             return
-        if meta.video_path:
+        if not await media_store.is_enabled():
+            raise MediaStoreError("OSS 未配置，无法保存下载媒体")
+        if meta.video_path and meta.video_path.exists():
             try:
                 meta.media_object_key = await media_store.upload_file(
                     meta.video_path,
-                    object_key=video_object_key(meta.video_id, meta.video_path),
+                    object_key=video_object_key(meta.video_id, meta.video_path, platform=meta.platform),
                 )
                 if meta.media_object_key and meta.video_path.exists():
                     meta.video_path.unlink()
             except MediaStoreError as e:
                 logger.warning("archive video failed for %s: %s", meta.video_id, e)
+                raise
             except OSError as e:
                 logger.warning("cleanup local video failed for %s: %s", meta.video_id, e)
         if meta.audio_path and meta.audio_path.exists() and not meta.audio_object_key:
             try:
                 meta.audio_object_key = await media_store.upload_file(
                     meta.audio_path,
-                    object_key=audio_object_key(meta.video_id, meta.audio_path),
+                    object_key=audio_object_key(meta.video_id, meta.audio_path, platform=meta.platform),
                 )
+                if meta.audio_object_key and meta.audio_path.exists():
+                    meta.audio_path.unlink()
             except MediaStoreError as e:
                 logger.warning("archive audio failed for %s: %s", meta.video_id, e)
+                raise
+            except OSError as e:
+                logger.warning("cleanup local audio failed for %s: %s", meta.video_id, e)
 
     async def _restore_cached_extract(self, task_id: UUID) -> ExtractorResult | None:
         async with session_scope() as s:

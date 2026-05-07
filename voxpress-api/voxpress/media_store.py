@@ -171,14 +171,14 @@ class OssMediaStore:
         return object_key
 
 
-def video_object_key(video_id: str, path: Path) -> str:
+def video_object_key(video_id: str, path: Path, *, platform: str = "douyin") -> str:
     suffix = path.suffix.lower() or ".mp4"
-    return f"douyin/videos/{video_id}{suffix}"
+    return f"{platform}/videos/{video_id}{suffix}"
 
 
-def audio_object_key(video_id: str, path: Path) -> str:
+def audio_object_key(video_id: str, path: Path, *, platform: str = "douyin") -> str:
     suffix = path.suffix.lower() or ".m4a"
-    return f"douyin/audio/{video_id}{suffix}"
+    return f"{platform}/audio/{video_id}{suffix}"
 
 
 media_store = OssMediaStore()
