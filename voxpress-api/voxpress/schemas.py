@@ -232,7 +232,7 @@ class ArticleBatchOut(BaseModel):
 
 
 class ArticleShareIn(BaseModel):
-    article_ids: list[UUID] = Field(min_length=1, max_length=200)
+    article_ids: list[UUID] = Field(min_length=1, max_length=1000)
 
 
 class ArticleShareItemOut(BaseModel):
