@@ -28,6 +28,10 @@ class CreatorBackfillNotFound(Exception):
     pass
 
 
+class CreatorBackfillStopped(Exception):
+    pass
+
+
 @dataclass(frozen=True)
 class CreatorBackfillTarget:
     creator_id: int
@@ -45,6 +49,8 @@ async def _load_target(creator_id: int) -> CreatorBackfillTarget:
         )
         if creator is None:
             raise CreatorBackfillNotFound(str(creator_id))
+        if creator.processing_stopped_at is not None:
+            raise CreatorBackfillStopped(creator.name)
         cookie_text = await load_cookie_text(s)
         return CreatorBackfillTarget(
             creator_id=creator.id,
@@ -65,8 +71,25 @@ def _detail(trigger_kind: str, target: CreatorBackfillTarget) -> str:
     return f"{prefix} · 主页标注 {target.listed_video_count} 条"
 
 
+async def _is_creator_stopped(creator_id: int) -> bool:
+    async with session_scope() as s:
+        stopped_at = await s.scalar(
+            select(Creator.processing_stopped_at).where(Creator.id == creator_id)
+        )
+    return stopped_at is not None
+
+
 async def _execute_run(run_id: UUID, target: CreatorBackfillTarget) -> None:
     try:
+        if await _is_creator_stopped(target.creator_id):
+            await finish_system_job_run(
+                run_id,
+                status="skipped",
+                detail=f"补齐 {target.name} 已跳过 · 来源已停止",
+                total_items=target.listed_video_count,
+                skipped_items=target.listed_video_count,
+            )
+            return
         if target.platform == "youtube":
             from voxpress.youtube_sync import sync_youtube_channel_by_id
 
@@ -103,6 +126,15 @@ async def _execute_run(run_id: UUID, target: CreatorBackfillTarget) -> None:
                 cookie_text=target.cookie_text,
                 max_videos=None,
             )
+            if await _is_creator_stopped(target.creator_id):
+                await finish_system_job_run(
+                    run_id,
+                    status="skipped",
+                    detail=f"补齐 {target.name} 已跳过 · 来源已停止",
+                    total_items=target.listed_video_count,
+                    skipped_items=target.listed_video_count,
+                )
+                return
             async with session_scope() as s:
                 await upsert_scraped_page(s, page, prune_missing=True)
 
@@ -219,6 +251,9 @@ async def _retry_start_creator_backfill_run(
             continue
         except CreatorBackfillNotFound:
             logger.info("creator backfill retry cancelled: creator_id=%s not found", creator_id)
+            return
+        except CreatorBackfillStopped:
+            logger.info("creator backfill retry cancelled: creator_id=%s stopped", creator_id)
             return
         logger.info("creator backfill retry started: creator_id=%s run_id=%s", creator_id, run_id)
         return

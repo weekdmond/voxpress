@@ -47,6 +47,8 @@ class Creator(Base):
     total_likes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     video_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     recent_update_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    processing_stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    processing_stop_reason: Mapped[str | None] = mapped_column(Text)
     imported_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

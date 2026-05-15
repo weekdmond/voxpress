@@ -5,7 +5,7 @@ from collections.abc import Iterable, Sequence
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from voxpress.models import Article, Task, Video
+from voxpress.models import Article, Creator, Task, Video
 
 
 def latest_videos(videos: Iterable[Video], *, limit: int) -> list[Video]:
@@ -28,6 +28,20 @@ async def create_auto_tasks_for_videos(
     limit: int,
 ) -> list[Task]:
     candidates = latest_videos(videos, limit=limit)
+    if not candidates:
+        return []
+    creator_ids = {video.creator_id for video in candidates}
+    stopped_creator_ids = set(
+        (
+            await s.scalars(
+                select(Creator.id).where(
+                    Creator.id.in_(creator_ids),
+                    Creator.processing_stopped_at.is_not(None),
+                )
+            )
+        ).all()
+    )
+    candidates = [video for video in candidates if video.creator_id not in stopped_creator_ids]
     if not candidates:
         return []
 

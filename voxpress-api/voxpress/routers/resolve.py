@@ -21,11 +21,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from voxpress.auto_tasks import create_auto_tasks_for_videos
 from voxpress.config import settings
-from voxpress.creator_backfill import schedule_creator_backfill_retry, start_creator_backfill_run
+from voxpress.creator_backfill import CreatorBackfillStopped, schedule_creator_backfill_retry, start_creator_backfill_run
 from voxpress.creator_sync import fetch_creator_page, load_cookie_text, upsert_scraped_page
 from voxpress.db import get_session
 from voxpress.errors import ApiError, InvalidUrl
-from voxpress.models import Task, Video
+from voxpress.models import Creator, Task, Video
 from voxpress.pipeline.douyin_scraper import ScrapeError
 from voxpress.pipeline.youtube_url import UnknownYouTubeLink, is_youtube_url, resolve_youtube_url
 from voxpress.pipeline.youtube_ytdlp import YouTubeExtractError, probe_video
@@ -88,6 +88,21 @@ async def resolve_link(
 
     # Creator: scrape via f2 (signs Douyin's web API with ms_token/a_bogus).
     assert info.external_id, "classifier should always produce sec_uid for creators"
+    existing_creator = await s.scalar(
+        select(Creator).where(Creator.platform == "douyin", Creator.external_id == info.external_id)
+    )
+    if existing_creator is not None and existing_creator.processing_stopped_at is not None:
+        return {
+            "kind": "creator",
+            "creator_id": existing_creator.id,
+            "name": existing_creator.name,
+            "video_count": existing_creator.video_count,
+            "fetched_video_count": 0,
+            "backfill_started": False,
+            "backfill_pending": False,
+            "backfill_run_id": None,
+            "stopped": True,
+        }
     cookie = await _load_cookie_text(s)
     logger.info(
         "resolve creator scrape start sec_uid=%s max_videos=%d",
@@ -163,6 +178,8 @@ async def resolve_link(
             logger.info("creator backfill skipped: another run is already active")
             schedule_creator_backfill_retry(creator_id=creator.id, trigger_kind="auto")
             backfill_pending = True
+        except CreatorBackfillStopped:
+            logger.info("creator backfill skipped: creator_id=%s stopped", creator.id)
     logger.info(
         "resolve creator synced creator_id=%s fetched_videos=%d stored_videos=%d elapsed_ms=%d",
         creator.id,
@@ -204,7 +221,13 @@ async def _resolve_youtube_link(
             raise ScrapeFailed(str(e), detail={"stage": "youtube_video_probe"}) from e
         creator = await upsert_youtube_channel(s, video_info.channel)
         await s.flush()
-        video = await upsert_youtube_video(s, creator.id, video_info)
+        await upsert_youtube_video(s, creator.id, video_info)
+        if creator.processing_stopped_at is not None:
+            raise ApiError(
+                f"来源「{creator.name}」已停止处理，请先恢复后再创建任务",
+                code="creator_stopped",
+                status_code=409,
+            )
         task = Task(
             source_url=video_info.source_url,
             title_guess=video_info.title,
@@ -234,7 +257,7 @@ async def _resolve_youtube_link(
     backfill_run_id: str | None = None
     backfill_started = False
     backfill_pending = False
-    if creator.video_count > fetched_count:
+    if creator.processing_stopped_at is None and creator.video_count > fetched_count:
         try:
             run_id = await start_creator_backfill_run(
                 creator_id=creator.id,
@@ -247,6 +270,8 @@ async def _resolve_youtube_link(
             logger.info("youtube creator backfill delayed: another run is already active")
             schedule_creator_backfill_retry(creator_id=creator.id, trigger_kind="auto")
             backfill_pending = True
+        except CreatorBackfillStopped:
+            logger.info("youtube creator backfill skipped: creator_id=%s stopped", creator.id)
     return {
         "kind": "creator",
         "creator_id": creator.id,

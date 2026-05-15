@@ -191,6 +191,11 @@
   color: var(--vp-warn);
   border-color: rgba(245, 158, 11, 0.24);
 }
+.chipDanger {
+  background: var(--vp-danger-soft);
+  color: var(--vp-danger);
+  border-color: rgba(244, 63, 94, 0.24);
+}
 .chipLink {
   display: inline-flex;
   align-items: center;
@@ -234,6 +239,47 @@
 .chipButton:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+.chipStopButton {
+  color: var(--vp-danger);
+  border-color: rgba(244, 63, 94, 0.28);
+  background: var(--vp-danger-soft);
+}
+.chipStopButton:hover:not(:disabled) {
+  color: #be123c;
+  border-color: rgba(244, 63, 94, 0.38);
+  background: #ffe4e6;
+}
+.chipResumeButton {
+  color: var(--vp-accent-2);
+  border-color: var(--vp-accent-tint);
+  background: var(--vp-accent-soft);
+}
+.chipResumeButton:hover:not(:disabled) {
+  color: var(--vp-accent-contrast);
+  border-color: var(--vp-accent);
+  background: var(--vp-accent);
+}
+.stopNotice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: -4px 0 14px;
+  padding: 11px 14px;
+  border-radius: var(--vp-radius-md);
+  border: 1px solid rgba(244, 63, 94, 0.22);
+  background: linear-gradient(135deg, var(--vp-danger-soft), rgba(255, 255, 255, 0.86));
+  color: var(--vp-ink-2);
+  box-shadow: var(--vp-shadow-sm);
+}
+.stopNotice b {
+  color: var(--vp-danger);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.stopNotice span {
+  font-size: 12px;
+  line-height: 1.55;
 }
 .vidExtBtn {
   display: inline-flex;
@@ -692,6 +738,12 @@
 }
 .cbx:hover {
   border-color: var(--vp-accent);
+}
+.cbx:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+  border-color: var(--vp-line);
+  background: var(--vp-bg-2);
 }
 .cbxOn {
   background: var(--vp-accent-2);

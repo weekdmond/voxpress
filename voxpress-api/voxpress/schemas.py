@@ -59,10 +59,14 @@ class CreatorOut(BaseModel):
     article_count: int = 0
     video_count: int
     recent_update_at: datetime | None = None
+    processing_stopped_at: datetime | None = None
+    processing_stop_reason: str | None = None
+    is_stopped: bool = False
     imported_at: datetime
 
     @classmethod
     def from_model(cls, c, article_count: int = 0) -> CreatorOut:
+        processing_stopped_at = getattr(c, "processing_stopped_at", None)
         return cls(
             id=c.id,
             platform=c.platform,  # type: ignore[arg-type]
@@ -79,12 +83,19 @@ class CreatorOut(BaseModel):
             article_count=article_count,
             video_count=c.video_count,
             recent_update_at=c.recent_update_at,
+            processing_stopped_at=processing_stopped_at,
+            processing_stop_reason=getattr(c, "processing_stop_reason", None),
+            is_stopped=processing_stopped_at is not None,
             imported_at=c.imported_at,
         )
 
 
 class ResolveCreatorIn(BaseModel):
     url: str = Field(min_length=1)
+
+
+class CreatorStopIn(BaseModel):
+    reason: str | None = Field(default=None, max_length=240)
 
 
 # ─── Video ──────────────────────────────────────────

@@ -11,9 +11,10 @@ from uuid import UUID
 from voxpress.config import settings
 from voxpress.creator_refresh import scheduler as creator_refresh_scheduler
 from voxpress.db import session_scope
-from voxpress.models import SettingEntry
+from voxpress.models import Creator, SettingEntry, Task
 from voxpress.pipeline import runner
 from voxpress.task_store import (
+    cancel_task as cancel_task_record,
     claim_next_task,
     clear_artifact,
     finish_stage_run,
@@ -33,6 +34,10 @@ _DYNAMIC_LLM_CONCURRENCY_MAX = 20
 
 
 class LeaseLost(RuntimeError):
+    pass
+
+
+class CreatorStoppedDuringRun(RuntimeError):
     pass
 
 
@@ -102,6 +107,19 @@ async def _ensure_progress(task_id: UUID, lease_owner: str, **kwargs) -> None:
         raise LeaseLost(f"task {task_id} lost lease before progress update")
 
 
+async def _cancel_if_creator_stopped(task_id: UUID) -> None:
+    async with session_scope() as s:
+        task = await s.get(Task, task_id)
+        if task is None or task.creator_id is None:
+            return
+        creator = await s.get(Creator, task.creator_id)
+        if creator is None or creator.processing_stopped_at is None:
+            return
+        detail = f"来源已停止 · {creator.name}"
+    await cancel_task_record(task_id, detail=detail)
+    raise CreatorStoppedDuringRun(detail)
+
+
 async def _advance(task_id: UUID, lease_owner: str, *, stage: str, progress: int, detail: str) -> None:
     ok = await queue_next_stage(
         task_id,
@@ -139,6 +157,7 @@ async def _process_download(task_id: UUID, lease_owner: str) -> None:
     )
     await _ensure_progress(task_id, lease_owner, progress=5, detail=start_detail, eta_sec=None)
     meta = await runner.download_stage(task_id)
+    await _cancel_if_creator_stopped(task_id)
     detail = "元信息读取完成" if meta.platform == "youtube" else "下载完成 · 已抽取音频"
     if meta.audio_object_key:
         detail = f"{detail} · 已归档音频"
@@ -333,6 +352,7 @@ async def _process_save(task_id: UUID, lease_owner: str) -> None:
 async def _run_claimed_task(stage: str, task_id: UUID, lease_owner: str) -> None:
     try:
         async with LeaseHeartbeater(task_id, lease_owner) as hb:
+            await _cancel_if_creator_stopped(task_id)
             if stage == "download":
                 await _process_download(task_id, lease_owner)
             elif stage == "transcribe":
@@ -347,6 +367,8 @@ async def _run_claimed_task(stage: str, task_id: UUID, lease_owner: str) -> None
                 raise RuntimeError(f"unknown stage {stage}")
     except LeaseLost:
         logger.info("task %s lease lost at stage %s", task_id, stage)
+    except CreatorStoppedDuringRun:
+        logger.info("task %s canceled because creator is stopped", task_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("task %s failed at stage %s", task_id, stage)
         await mark_task_failed(task_id, lease_owner=lease_owner, error=str(exc))

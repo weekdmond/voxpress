@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from voxpress.db import get_session
 from voxpress.errors import CreatorNotFound
-from voxpress.models import Article, Creator
-from voxpress.schemas import CreatorOut, Page, Platform, ResolveCreatorIn
+from voxpress.models import Article, Creator, Task
+from voxpress.schemas import CreatorOut, CreatorStopIn, Page, Platform, ResolveCreatorIn
+from voxpress.task_store import ACTIVE_STATUSES, cancel_task as cancel_task_record
 from voxpress.url_resolve import normalize_douyin_input
 
 router = APIRouter(prefix="/api/creators", tags=["creators"])
@@ -22,6 +25,16 @@ def _creator_list_stmt():
         .outerjoin(Article, Article.creator_id == Creator.id)
         .group_by(Creator.id)
     )
+
+
+async def _load_creator_with_count(s: AsyncSession, creator_id: int) -> tuple[Creator, int]:
+    row = (
+        await s.execute(_creator_list_stmt().where(Creator.id == creator_id))
+    ).one_or_none()
+    if row is None:
+        raise CreatorNotFound(f"creator {creator_id} not found")
+    creator, count = row
+    return creator, int(count)
 
 
 @router.get("", response_model=Page[CreatorOut])
@@ -64,13 +77,48 @@ async def list_creators(
 
 @router.get("/{creator_id}", response_model=CreatorOut)
 async def get_creator(creator_id: int, s: AsyncSession = Depends(get_session)) -> CreatorOut:
-    row = (
-        await s.execute(_creator_list_stmt().where(Creator.id == creator_id))
-    ).one_or_none()
-    if row is None:
-        raise CreatorNotFound(f"creator {creator_id} not found")
-    creator, count = row
-    return CreatorOut.from_model(creator, article_count=int(count))
+    creator, count = await _load_creator_with_count(s, creator_id)
+    return CreatorOut.from_model(creator, article_count=count)
+
+
+@router.post("/{creator_id}/stop", response_model=CreatorOut)
+async def stop_creator_processing(
+    creator_id: int,
+    payload: CreatorStopIn | None = None,
+    s: AsyncSession = Depends(get_session),
+) -> CreatorOut:
+    creator, count = await _load_creator_with_count(s, creator_id)
+    reason = (payload.reason.strip() if payload and payload.reason else "") or "用户手动停止"
+    if creator.processing_stopped_at is None:
+        creator.processing_stopped_at = datetime.now(tz=timezone.utc)
+    creator.processing_stop_reason = reason
+    active_task_ids = list(
+        (
+            await s.scalars(
+                select(Task.id).where(
+                    Task.creator_id == creator.id,
+                    Task.status.in_(ACTIVE_STATUSES),
+                )
+            )
+        ).all()
+    )
+    await s.commit()
+    cancel_detail = f"来源已停止 · {creator.name}"
+    for task_id in active_task_ids:
+        await cancel_task_record(task_id, detail=cancel_detail)
+    return CreatorOut.from_model(creator, article_count=count)
+
+
+@router.post("/{creator_id}/resume", response_model=CreatorOut)
+async def resume_creator_processing(
+    creator_id: int,
+    s: AsyncSession = Depends(get_session),
+) -> CreatorOut:
+    creator, count = await _load_creator_with_count(s, creator_id)
+    creator.processing_stopped_at = None
+    creator.processing_stop_reason = None
+    await s.commit()
+    return CreatorOut.from_model(creator, article_count=count)
 
 
 @router.post("/resolve", response_model=CreatorOut)

@@ -45,6 +45,11 @@ class TaskNotFound(NotFound):
     code = "task_not_found"
 
 
+class CreatorStopped(ApiError):
+    status_code = 409
+    code = "creator_stopped"
+
+
 class AlreadyProcessed(ApiError):
     status_code = 409
     code = "already_processed"

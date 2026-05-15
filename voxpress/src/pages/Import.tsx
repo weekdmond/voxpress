@@ -288,6 +288,8 @@ export function ImportPage() {
   const filteredOrganizedCount = filteredSummary?.organized ?? 0;
   const filteredPendingCount =
     filteredSummary?.pending ?? Math.max(0, filteredTotalVideos - filteredOrganizedCount);
+  const isCreatorStopped = Boolean(creator?.is_stopped || creator?.processing_stopped_at);
+  const canProcessCreator = !isCreatorStopped;
 
   const allCbxCls =
     !selection.someOnPageSelected
@@ -297,11 +299,15 @@ export function ImportPage() {
       : [s.cbx, s.cbxIndet].join(' ');
 
   const submit = useMutation({
-    mutationFn: () =>
-      api.post<TaskBatchResult>('/api/tasks/batch', {
+    mutationFn: () => {
+      if (!canProcessCreator) {
+        throw new Error('来源已停止处理，请先恢复后再创建任务');
+      }
+      return api.post<TaskBatchResult>('/api/tasks/batch', {
         video_ids: selection.selectedIds,
         creator_id: idNum,
-      }),
+      });
+    },
     onSuccess: (r) => {
       toast.success(`已创建 ${r.tasks.length} 个任务`);
       qc.invalidateQueries({ queryKey: ['tasks'] });
@@ -318,6 +324,31 @@ export function ImportPage() {
       qc.invalidateQueries({ queryKey: ['system-jobs'] });
     },
     onError: (err: Error) => toast.error(err.message || '启动补齐失败'),
+  });
+
+  const stopMut = useMutation({
+    mutationFn: () =>
+      api.post<Creator>(`/api/creators/${idNum}/stop`, {
+        reason: '用户手动停止',
+      }),
+    onSuccess: () => {
+      toast.success('已停止该来源的作品抓取和转译');
+      selection.clearSelection();
+      qc.invalidateQueries({ queryKey: ['creator', idNum] });
+      qc.invalidateQueries({ queryKey: ['creators'] });
+      qc.invalidateQueries({ queryKey: ['tasks'] });
+    },
+    onError: (err: Error) => toast.error(err.message || '停止失败'),
+  });
+
+  const resumeMut = useMutation({
+    mutationFn: () => api.post<Creator>(`/api/creators/${idNum}/resume`),
+    onSuccess: () => {
+      toast.success('已恢复该来源处理');
+      qc.invalidateQueries({ queryKey: ['creator', idNum] });
+      qc.invalidateQueries({ queryKey: ['creators'] });
+    },
+    onError: (err: Error) => toast.error(err.message || '恢复失败'),
   });
 
   const clearAll = () => {
@@ -409,6 +440,9 @@ export function ImportPage() {
                     待处理 {pendingCount.toLocaleString()}
                   </span>
                 ) : null}
+                {isCreatorStopped ? (
+                  <span className={[s.chip, s.chipDanger].join(' ')}>已停止</span>
+                ) : null}
                 {creatorExternalUrl(creator) ? (
                   <a
                     className={s.chipLink}
@@ -423,9 +457,9 @@ export function ImportPage() {
                 ) : null}
                 <button
                   className={s.chipButton}
-                  disabled={backfillMut.isPending}
+                  disabled={backfillMut.isPending || isCreatorStopped}
                   onClick={() => backfillMut.mutate()}
-                  title="后台重新同步这个博主的作品"
+                  title={isCreatorStopped ? '来源已停止，请先恢复处理' : '后台重新同步这个博主的作品'}
                 >
                   <Icon name="refresh" size={11} />
                   {backfillMut.isPending
@@ -433,6 +467,26 @@ export function ImportPage() {
                     : backfillMissingCount > 0
                       ? `补齐作品 ${formatCount(backfillMissingCount)}`
                       : '重新同步'}
+                </button>
+                <button
+                  className={[
+                    s.chipButton,
+                    isCreatorStopped ? s.chipResumeButton : s.chipStopButton,
+                  ].join(' ')}
+                  disabled={stopMut.isPending || resumeMut.isPending}
+                  onClick={() => {
+                    if (isCreatorStopped) {
+                      resumeMut.mutate();
+                      return;
+                    }
+                    if (window.confirm('停止后会取消该来源当前排队/运行中的任务，并跳过后续自动抓取。确认停止吗？')) {
+                      stopMut.mutate();
+                    }
+                  }}
+                  title={isCreatorStopped ? '恢复这个来源的抓取和转译' : '停止这个来源的抓取和转译'}
+                >
+                  <Icon name={isCreatorStopped ? 'refresh' : 'pause'} size={11} />
+                  {isCreatorStopped ? '恢复处理' : '停止处理'}
                 </button>
               </div>
               <div className={s.creatorMeta}>
@@ -471,6 +525,17 @@ export function ImportPage() {
               <span>获赞</span>
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {isCreatorStopped ? (
+        <div className={s.stopNotice}>
+          <b>该来源已停止处理</b>
+          <span>
+            不会再自动抓取新作品、补齐作品或创建转译任务；已排队/运行中的任务已被取消。
+            {creator?.processing_stopped_at ? ` 停止时间：${formatDateTime(creator.processing_stopped_at)}。` : ''}
+            {creator?.processing_stop_reason ? ` 原因：${creator.processing_stop_reason}。` : ''}
+          </span>
         </div>
       ) : null}
 
@@ -543,8 +608,9 @@ export function ImportPage() {
         </button>
         <button
           className={[s.btn, s.btnPrimary].join(' ')}
-          disabled={selCount === 0 || submit.isPending}
+          disabled={selCount === 0 || submit.isPending || !canProcessCreator}
           onClick={() => submit.mutate()}
+          title={canProcessCreator ? undefined : '来源已停止，请先恢复处理'}
         >
           开始处理 {selCount} 条
         </button>
@@ -585,7 +651,13 @@ export function ImportPage() {
         <div className={s.tableScroll}>
           <div className={s.tHead}>
             <span>
-              <button className={allCbxCls} onClick={selection.toggleAllOnPage} aria-label="全选" />
+              <button
+                className={allCbxCls}
+                disabled={!canProcessCreator}
+                onClick={selection.toggleAllOnPage}
+                aria-label="全选"
+                title={canProcessCreator ? undefined : '来源已停止，请先恢复处理'}
+              />
             </span>
             <span>视频</span>
             <span>时长</span>
@@ -611,6 +683,8 @@ export function ImportPage() {
                     if (tgt.closest('button')) return;
                     if (isOrganized && v.article_id) {
                       navigate(`/articles/${v.article_id}`);
+                    } else if (!canProcessCreator) {
+                      toast.info('来源已停止处理，请先恢复后再选择待处理作品');
                     } else {
                       selection.toggleOne(v);
                     }
@@ -619,8 +693,10 @@ export function ImportPage() {
                   <span>
                     <button
                       className={[s.cbx, isSel ? s.cbxOn : ''].join(' ')}
+                      disabled={!canProcessCreator}
                       onClick={(e) => {
                         e.stopPropagation();
+                        if (!canProcessCreator) return;
                         selection.toggleOne(v);
                       }}
                       aria-label="选择"
@@ -722,8 +798,9 @@ export function ImportPage() {
           </button>
           <button
             className={s.stickyPrimary}
-            disabled={submit.isPending}
+            disabled={submit.isPending || !canProcessCreator}
             onClick={() => submit.mutate()}
+            title={canProcessCreator ? undefined : '来源已停止，请先恢复处理'}
           >
             开始处理 <Icon name="arrow-right" size={12} />
           </button>

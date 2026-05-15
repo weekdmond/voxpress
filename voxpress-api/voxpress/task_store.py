@@ -622,7 +622,7 @@ async def mark_task_failed(task_id: UUID, *, lease_owner: str, error: str) -> bo
     return True
 
 
-async def cancel_task(task_id: UUID) -> Task | None:
+async def cancel_task(task_id: UUID, *, detail: str = "已取消") -> Task | None:
     async with session_scope() as s:
         task = await s.get(Task, task_id)
         if task is None:
@@ -630,13 +630,13 @@ async def cancel_task(task_id: UUID) -> Task | None:
         if task.status not in ACTIVE_STATUSES:
             return task
         task.status = "canceled"
-        task.detail = "已取消"
+        task.detail = detail
         task.finished_at = _now()
         task.lease_owner = None
         task.lease_expires_at = None
         task.last_heartbeat_at = None
         task.updated_at = _now()
-        await _finalize_current_stage_run(s, task, status="canceled", detail="已取消", error=None)
+        await _finalize_current_stage_run(s, task, status="canceled", detail=detail, error=None)
         await _rollup_task_metrics(s, task)
     await emit_task_update(task_id)
     await emit_task_remove(task_id)

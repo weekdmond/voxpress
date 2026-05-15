@@ -50,6 +50,9 @@ export interface Creator {
   article_count: number;
   video_count: number;
   recent_update_at: ISO8601 | null;
+  processing_stopped_at?: ISO8601 | null;
+  processing_stop_reason?: string | null;
+  is_stopped?: boolean;
   imported_at: ISO8601;
 }
 

@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from voxpress.db import get_session, session_scope
-from voxpress.errors import InvalidUrl, TaskNotFound
+from voxpress.errors import CreatorStopped, InvalidUrl, TaskNotFound
 from voxpress.models import Article, Creator, Task, TaskStageRun, Transcript, Video
 from voxpress.schemas import (
     Page,
@@ -48,6 +48,29 @@ RERUN_STAGE_PROGRESS = {
     "organize": 72,
     "save": 92,
 }
+
+
+async def _creator_is_stopped(s: AsyncSession, creator_id: int | None) -> bool:
+    if creator_id is None:
+        return False
+    stopped_at = await s.scalar(
+        select(Creator.processing_stopped_at).where(Creator.id == creator_id)
+    )
+    return stopped_at is not None
+
+
+async def _ensure_creator_accepts_tasks(s: AsyncSession, creator_id: int | None) -> None:
+    if creator_id is None:
+        return
+    row = await s.execute(
+        select(Creator.name, Creator.processing_stopped_at).where(Creator.id == creator_id)
+    )
+    item = row.one_or_none()
+    if item is None:
+        return
+    creator_name, stopped_at = item
+    if stopped_at is not None:
+        raise CreatorStopped(f"来源「{creator_name}」已停止处理，请先恢复后再创建任务")
 
 
 def _url_kind(url: str) -> str | None:
@@ -98,6 +121,7 @@ async def _create_task(
     progress: int = 0,
     detail: str | None = None,
 ) -> Task:
+    await _ensure_creator_accepts_tasks(s, creator_id)
     task = Task(
         source_url=source_url,
         title_guess=title_guess,
@@ -509,17 +533,29 @@ async def create_batch(payload: TaskBatchIn, s: AsyncSession = Depends(get_sessi
     video_ids = payload.video_ids or []
     if not video_ids:
         raise InvalidUrl("video_ids 不能为空")
+    await _ensure_creator_accepts_tasks(s, payload.creator_id)
 
     stmt = select(Video).where(Video.id.in_(video_ids))
     if payload.creator_id is not None:
         stmt = stmt.where(Video.creator_id == payload.creator_id)
     rows = (await s.scalars(stmt)).all()
     found = {v.id: v for v in rows}
+    stopped_creator_ids = {
+        int(creator_id)
+        for creator_id, stopped_at in (
+            await s.execute(
+                select(Creator.id, Creator.processing_stopped_at).where(
+                    Creator.id.in_({v.creator_id for v in rows})
+                )
+            )
+        ).all()
+        if stopped_at is not None
+    }
 
     created: list[Task] = []
     for vid in video_ids:
         v = found.get(vid)
-        if not v:
+        if not v or v.creator_id in stopped_creator_ids:
             continue
         task = await _create_task(
             s,
@@ -547,6 +583,9 @@ async def rerun_tasks(payload: TaskRerunIn, s: AsyncSession = Depends(get_sessio
     for task_id in payload.task_ids:
         task = task_map.get(task_id)
         if task is None:
+            skipped.append(task_id)
+            continue
+        if await _creator_is_stopped(s, task.creator_id):
             skipped.append(task_id)
             continue
         rerun_stage = await _resolve_rerun_stage(s, task, payload.mode)

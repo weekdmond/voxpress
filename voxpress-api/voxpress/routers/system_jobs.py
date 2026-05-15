@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import Text, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from voxpress.creator_backfill import CreatorBackfillNotFound, start_creator_backfill_run
+from voxpress.creator_backfill import CreatorBackfillNotFound, CreatorBackfillStopped, start_creator_backfill_run
 from voxpress.creator_refresh import start_creator_refresh_run
 from voxpress.db import get_session
 from voxpress.errors import ApiError
@@ -227,6 +227,12 @@ async def run_system_job(
             )
         except CreatorBackfillNotFound as e:
             raise ApiError("创作者不存在", code="creator_not_found", status_code=404) from e
+        except CreatorBackfillStopped as e:
+            raise ApiError(
+                "来源已停止处理，请先恢复后再补齐作品",
+                code="creator_stopped",
+                status_code=409,
+            ) from e
         except SystemJobAlreadyRunning:
             await _raise_running_job_error(s, job_key)
     else:

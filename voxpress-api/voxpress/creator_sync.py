@@ -66,22 +66,25 @@ async def upsert_scraped_page(
 async def refresh_all_creators(*, max_videos: int) -> CreatorRefreshSummary:
     async with session_scope() as s:
         cookie_text = await load_cookie_text(s)
-        douyin_rows = (
+        douyin_rows_all = (
             await s.execute(
-                select(Creator.id, Creator.external_id)
+                select(Creator.id, Creator.external_id, Creator.processing_stopped_at)
                 .where(Creator.platform == "douyin")
                 .order_by(Creator.followers.desc(), Creator.id.asc())
             )
         ).all()
-        youtube_rows = (
+        youtube_rows_all = (
             await s.execute(
-                select(Creator.id, Creator.external_id)
+                select(Creator.id, Creator.external_id, Creator.processing_stopped_at)
                 .where(Creator.platform == "youtube")
                 .order_by(Creator.followers.desc(), Creator.id.asc())
             )
         ).all()
+        douyin_rows = [(creator_id, external_id) for creator_id, external_id, stopped_at in douyin_rows_all if stopped_at is None]
+        youtube_rows = [(creator_id, external_id) for creator_id, external_id, stopped_at in youtube_rows_all if stopped_at is None]
 
-    total = len(douyin_rows) + len(youtube_rows)
+    total = len(douyin_rows_all) + len(youtube_rows_all)
+    stopped_count = total - len(douyin_rows) - len(youtube_rows)
     if total == 0:
         return CreatorRefreshSummary(total=0, refreshed=0, failed=0, skipped=0)
     if douyin_rows and (not cookie_text or not cookie_text.strip()):
@@ -91,7 +94,7 @@ async def refresh_all_creators(*, max_videos: int) -> CreatorRefreshSummary:
 
     refreshed = 0
     failed = 0
-    skipped = len(douyin_rows) if douyin_rows and (not cookie_text or not cookie_text.strip()) else 0
+    skipped = stopped_count + (len(douyin_rows) if douyin_rows and (not cookie_text or not cookie_text.strip()) else 0)
     auto_tasks = 0
 
     for creator_id, sec_uid in douyin_rows:
@@ -106,8 +109,8 @@ async def refresh_all_creators(*, max_videos: int) -> CreatorRefreshSummary:
                 return CreatorRefreshSummary(
                     total=total,
                     refreshed=refreshed,
-                    failed=total - refreshed,
-                    skipped=0,
+                    failed=(len(douyin_rows) + len(youtube_rows)) - refreshed,
+                    skipped=stopped_count,
                 )
             failed += 1
             logger.warning(

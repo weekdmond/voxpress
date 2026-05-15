@@ -13,6 +13,7 @@ export type IconName =
   | 'sparkle'
   | 'check'
   | 'play'
+  | 'pause'
   | 'heart'
   | 'clock'
   | 'comment'
