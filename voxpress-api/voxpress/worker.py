@@ -115,7 +115,7 @@ async def _cancel_if_creator_stopped(task_id: UUID) -> None:
         creator = await s.get(Creator, task.creator_id)
         if creator is None or creator.processing_stopped_at is None:
             return
-        detail = f"来源已停止 · {creator.name}"
+        detail = f"来源已暂停同步 · {creator.name}"
     await cancel_task_record(task_id, detail=detail)
     raise CreatorStoppedDuringRun(detail)
 

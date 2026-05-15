@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Page, PageHead } from '@/layouts/AppShell';
 import { useCrossPageSelection } from '@/hooks/useCrossPageSelection';
-import { Avatar, Icon, Select } from '@/components/primitives';
+import { Avatar, ConfirmDialog, Icon, Select } from '@/components/primitives';
 import { api } from '@/lib/api';
 import { formatCount, formatDate, formatDateTime, formatDuration } from '@/lib/format';
 import { mediaCandidates } from '@/lib/media';
@@ -201,6 +201,7 @@ export function ImportPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [openDrop, setOpenDrop] = useState<string | null>(null);
+  const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false);
 
   useEffect(() => {
     if (!openDrop) return;
@@ -301,7 +302,7 @@ export function ImportPage() {
   const submit = useMutation({
     mutationFn: () => {
       if (!canProcessCreator) {
-        throw new Error('来源已停止处理，请先恢复后再创建任务');
+        throw new Error('来源已暂停同步，请先恢复同步后再创建任务');
       }
       return api.post<TaskBatchResult>('/api/tasks/batch', {
         video_ids: selection.selectedIds,
@@ -329,10 +330,11 @@ export function ImportPage() {
   const stopMut = useMutation({
     mutationFn: () =>
       api.post<Creator>(`/api/creators/${idNum}/stop`, {
-        reason: '用户手动停止',
+        reason: '用户手动暂停',
       }),
     onSuccess: () => {
-      toast.success('已停止该来源的作品抓取和转译');
+      toast.success('已暂停该来源的抓取和转译');
+      setPauseConfirmOpen(false);
       selection.clearSelection();
       qc.invalidateQueries({ queryKey: ['creator', idNum] });
       qc.invalidateQueries({ queryKey: ['creators'] });
@@ -441,7 +443,7 @@ export function ImportPage() {
                   </span>
                 ) : null}
                 {isCreatorStopped ? (
-                  <span className={[s.chip, s.chipDanger].join(' ')}>已停止</span>
+                  <span className={[s.chip, s.chipDanger].join(' ')}>已暂停</span>
                 ) : null}
                 {creatorExternalUrl(creator) ? (
                   <a
@@ -459,7 +461,7 @@ export function ImportPage() {
                   className={s.chipButton}
                   disabled={backfillMut.isPending || isCreatorStopped}
                   onClick={() => backfillMut.mutate()}
-                  title={isCreatorStopped ? '来源已停止，请先恢复处理' : '后台重新同步这个博主的作品'}
+                  title={isCreatorStopped ? '来源已暂停，请先恢复同步' : '后台重新同步这个博主的作品'}
                 >
                   <Icon name="refresh" size={11} />
                   {backfillMut.isPending
@@ -479,14 +481,12 @@ export function ImportPage() {
                       resumeMut.mutate();
                       return;
                     }
-                    if (window.confirm('停止后会取消该来源当前排队/运行中的任务，并跳过后续自动抓取。确认停止吗？')) {
-                      stopMut.mutate();
-                    }
+                    setPauseConfirmOpen(true);
                   }}
-                  title={isCreatorStopped ? '恢复这个来源的抓取和转译' : '停止这个来源的抓取和转译'}
+                  title={isCreatorStopped ? '恢复这个来源的抓取和转译' : '暂停这个来源的抓取和转译'}
                 >
                   <Icon name={isCreatorStopped ? 'refresh' : 'pause'} size={11} />
-                  {isCreatorStopped ? '恢复处理' : '停止处理'}
+                  {isCreatorStopped ? '恢复同步' : '暂停同步'}
                 </button>
               </div>
               <div className={s.creatorMeta}>
@@ -530,10 +530,10 @@ export function ImportPage() {
 
       {isCreatorStopped ? (
         <div className={s.stopNotice}>
-          <b>该来源已停止处理</b>
+          <b>该来源已暂停同步</b>
           <span>
             不会再自动抓取新作品、补齐作品或创建转译任务；已排队/运行中的任务已被取消。
-            {creator?.processing_stopped_at ? ` 停止时间：${formatDateTime(creator.processing_stopped_at)}。` : ''}
+            {creator?.processing_stopped_at ? ` 暂停时间：${formatDateTime(creator.processing_stopped_at)}。` : ''}
             {creator?.processing_stop_reason ? ` 原因：${creator.processing_stop_reason}。` : ''}
           </span>
         </div>
@@ -610,7 +610,7 @@ export function ImportPage() {
           className={[s.btn, s.btnPrimary].join(' ')}
           disabled={selCount === 0 || submit.isPending || !canProcessCreator}
           onClick={() => submit.mutate()}
-          title={canProcessCreator ? undefined : '来源已停止，请先恢复处理'}
+          title={canProcessCreator ? undefined : '来源已暂停，请先恢复同步'}
         >
           开始处理 {selCount} 条
         </button>
@@ -656,7 +656,7 @@ export function ImportPage() {
                 disabled={!canProcessCreator}
                 onClick={selection.toggleAllOnPage}
                 aria-label="全选"
-                title={canProcessCreator ? undefined : '来源已停止，请先恢复处理'}
+                title={canProcessCreator ? undefined : '来源已暂停，请先恢复同步'}
               />
             </span>
             <span>视频</span>
@@ -684,7 +684,7 @@ export function ImportPage() {
                     if (isOrganized && v.article_id) {
                       navigate(`/articles/${v.article_id}`);
                     } else if (!canProcessCreator) {
-                      toast.info('来源已停止处理，请先恢复后再选择待处理作品');
+                      toast.info('来源已暂停同步，请先恢复后再选择待处理作品');
                     } else {
                       selection.toggleOne(v);
                     }
@@ -800,12 +800,23 @@ export function ImportPage() {
             className={s.stickyPrimary}
             disabled={submit.isPending || !canProcessCreator}
             onClick={() => submit.mutate()}
-            title={canProcessCreator ? undefined : '来源已停止，请先恢复处理'}
+            title={canProcessCreator ? undefined : '来源已暂停，请先恢复同步'}
           >
             开始处理 <Icon name="arrow-right" size={12} />
           </button>
         </div>
       ) : null}
+
+      <ConfirmDialog
+        open={pauseConfirmOpen}
+        title="暂停这个来源的同步？"
+        description="暂停后会取消该来源当前排队/运行中的任务，并跳过后续自动抓取和转译；已转好的文章不会受影响。"
+        confirmLabel="确认暂停"
+        cancelLabel="取消"
+        pending={stopMut.isPending}
+        onConfirm={() => stopMut.mutate()}
+        onCancel={() => setPauseConfirmOpen(false)}
+      />
     </Page>
   );
 }

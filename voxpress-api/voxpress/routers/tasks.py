@@ -70,7 +70,7 @@ async def _ensure_creator_accepts_tasks(s: AsyncSession, creator_id: int | None)
         return
     creator_name, stopped_at = item
     if stopped_at is not None:
-        raise CreatorStopped(f"来源「{creator_name}」已停止处理，请先恢复后再创建任务")
+        raise CreatorStopped(f"来源「{creator_name}」已暂停同步，请先恢复同步后再创建任务")
 
 
 def _url_kind(url: str) -> str | None:

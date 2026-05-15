@@ -224,7 +224,7 @@ async def _resolve_youtube_link(
         await upsert_youtube_video(s, creator.id, video_info)
         if creator.processing_stopped_at is not None:
             raise ApiError(
-                f"来源「{creator.name}」已停止处理，请先恢复后再创建任务",
+                f"来源「{creator.name}」已暂停同步，请先恢复同步后再创建任务",
                 code="creator_stopped",
                 status_code=409,
             )

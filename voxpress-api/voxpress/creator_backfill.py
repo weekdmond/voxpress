@@ -85,7 +85,7 @@ async def _execute_run(run_id: UUID, target: CreatorBackfillTarget) -> None:
             await finish_system_job_run(
                 run_id,
                 status="skipped",
-                detail=f"补齐 {target.name} 已跳过 · 来源已停止",
+                detail=f"补齐 {target.name} 已跳过 · 来源已暂停同步",
                 total_items=target.listed_video_count,
                 skipped_items=target.listed_video_count,
             )
@@ -130,7 +130,7 @@ async def _execute_run(run_id: UUID, target: CreatorBackfillTarget) -> None:
                 await finish_system_job_run(
                     run_id,
                     status="skipped",
-                    detail=f"补齐 {target.name} 已跳过 · 来源已停止",
+                    detail=f"补齐 {target.name} 已跳过 · 来源已暂停同步",
                     total_items=target.listed_video_count,
                     skipped_items=target.listed_video_count,
                 )

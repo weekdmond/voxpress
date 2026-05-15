@@ -88,7 +88,7 @@ async def stop_creator_processing(
     s: AsyncSession = Depends(get_session),
 ) -> CreatorOut:
     creator, count = await _load_creator_with_count(s, creator_id)
-    reason = (payload.reason.strip() if payload and payload.reason else "") or "用户手动停止"
+    reason = (payload.reason.strip() if payload and payload.reason else "") or "用户手动暂停"
     if creator.processing_stopped_at is None:
         creator.processing_stopped_at = datetime.now(tz=timezone.utc)
     creator.processing_stop_reason = reason
@@ -103,7 +103,7 @@ async def stop_creator_processing(
         ).all()
     )
     await s.commit()
-    cancel_detail = f"来源已停止 · {creator.name}"
+    cancel_detail = f"来源已暂停同步 · {creator.name}"
     for task_id in active_task_ids:
         await cancel_task_record(task_id, detail=cancel_detail)
     return CreatorOut.from_model(creator, article_count=count)

@@ -87,7 +87,7 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
     const c = creators.find((c) => c.id === id);
     if (!c) throw apiError('creator_not_found', '创作者不存在', 404);
     c.processing_stopped_at = new Date().toISOString();
-    c.processing_stop_reason = '用户手动停止';
+    c.processing_stop_reason = '用户手动暂停';
     c.is_stopped = true;
     return delay(c);
   }
@@ -313,7 +313,7 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
     const b = body as { creator_id?: number; video_ids?: string[] } | undefined;
     const creator = creators.find((item) => item.id === b?.creator_id);
     if (creator?.is_stopped || creator?.processing_stopped_at) {
-      throw apiError('creator_stopped', '来源已停止处理，请先恢复后再创建任务', 409);
+      throw apiError('creator_stopped', '来源已暂停同步，请先恢复同步后再创建任务', 409);
     }
     const ids = b?.video_ids ?? [];
     const tasks = ids.map((vid) => mockStore.createTask(`https://www.douyin.com/video/${vid}`));
@@ -396,7 +396,7 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
     const creatorId = Number(params.get('creator_id') ?? 0);
     const creator = creators.find((item) => item.id === creatorId) ?? creators[0];
     if (creator?.is_stopped || creator?.processing_stopped_at) {
-      throw apiError('creator_stopped', '来源已停止处理，请先恢复后再补齐作品', 409);
+      throw apiError('creator_stopped', '来源已暂停同步，请先恢复同步后再补齐作品', 409);
     }
     const now = new Date().toISOString();
     return delay({
