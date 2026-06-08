@@ -275,6 +275,11 @@ export interface SystemJobRun {
   scope: string | null;
   detail: string | null;
   error: string | null;
+  result: {
+    failures?: SystemJobResultItem[];
+    skipped?: SystemJobResultItem[];
+    [key: string]: unknown;
+  };
   total_items: number;
   processed_items: number;
   failed_items: number;
@@ -283,6 +288,15 @@ export interface SystemJobRun {
   started_at: ISO8601;
   updated_at: ISO8601;
   finished_at: ISO8601 | null;
+}
+
+export interface SystemJobResultItem {
+  creator_id?: number;
+  platform?: Platform | string;
+  name?: string;
+  handle?: string | null;
+  error?: string;
+  reason?: string;
 }
 
 export interface SystemJobSummary {

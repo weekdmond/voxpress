@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Sequence
 from uuid import UUID
@@ -26,6 +26,14 @@ class CreatorRefreshSummary:
     failed: int
     skipped: int = 0
     auto_tasks: int = 0
+    failures: list[dict[str, object]] = field(default_factory=list)
+    skipped_details: list[dict[str, object]] = field(default_factory=list)
+
+    def result(self) -> dict[str, object]:
+        return {
+            "failures": self.failures,
+            "skipped": self.skipped_details,
+        }
 
 
 async def load_cookie_text(s: AsyncSession) -> str | None:
@@ -68,36 +76,58 @@ async def refresh_all_creators(*, max_videos: int) -> CreatorRefreshSummary:
         cookie_text = await load_cookie_text(s)
         douyin_rows_all = (
             await s.execute(
-                select(Creator.id, Creator.external_id, Creator.processing_stopped_at)
+                select(Creator.id, Creator.name, Creator.handle, Creator.external_id, Creator.processing_stopped_at)
                 .where(Creator.platform == "douyin")
                 .order_by(Creator.followers.desc(), Creator.id.asc())
             )
         ).all()
         youtube_rows_all = (
             await s.execute(
-                select(Creator.id, Creator.external_id, Creator.processing_stopped_at)
+                select(Creator.id, Creator.name, Creator.handle, Creator.external_id, Creator.processing_stopped_at)
                 .where(Creator.platform == "youtube")
                 .order_by(Creator.followers.desc(), Creator.id.asc())
             )
         ).all()
-        douyin_rows = [(creator_id, external_id) for creator_id, external_id, stopped_at in douyin_rows_all if stopped_at is None]
-        youtube_rows = [(creator_id, external_id) for creator_id, external_id, stopped_at in youtube_rows_all if stopped_at is None]
+        douyin_rows = [row for row in douyin_rows_all if row.processing_stopped_at is None]
+        youtube_rows = [row for row in youtube_rows_all if row.processing_stopped_at is None]
 
     total = len(douyin_rows_all) + len(youtube_rows_all)
     stopped_count = total - len(douyin_rows) - len(youtube_rows)
+    skipped_details = [
+        _creator_result_item("douyin", row, reason="来源已暂停同步")
+        for row in douyin_rows_all
+        if row.processing_stopped_at is not None
+    ] + [
+        _creator_result_item("youtube", row, reason="来源已暂停同步")
+        for row in youtube_rows_all
+        if row.processing_stopped_at is not None
+    ]
     if total == 0:
         return CreatorRefreshSummary(total=0, refreshed=0, failed=0, skipped=0)
     if douyin_rows and (not cookie_text or not cookie_text.strip()):
         logger.warning("creator refresh skipped: missing Douyin cookie")
+        skipped_details.extend(
+            _creator_result_item("douyin", row, reason="缺少抖音 Cookie，已跳过")
+            for row in douyin_rows
+        )
         if not youtube_rows:
-            return CreatorRefreshSummary(total=total, refreshed=0, failed=0, skipped=total)
+            return CreatorRefreshSummary(
+                total=total,
+                refreshed=0,
+                failed=0,
+                skipped=total,
+                skipped_details=skipped_details,
+            )
 
     refreshed = 0
     failed = 0
     skipped = stopped_count + (len(douyin_rows) if douyin_rows and (not cookie_text or not cookie_text.strip()) else 0)
     auto_tasks = 0
+    failures: list[dict[str, object]] = []
 
-    for creator_id, sec_uid in douyin_rows:
+    for index, row in enumerate(douyin_rows):
+        creator_id = row.id
+        sec_uid = row.external_id
         if not cookie_text or not cookie_text.strip():
             continue
         try:
@@ -106,13 +136,23 @@ async def refresh_all_creators(*, max_videos: int) -> CreatorRefreshSummary:
             message = str(e)
             if _looks_like_cookie_issue(message):
                 logger.warning("creator refresh aborted: %s", message)
+                remaining_failures = [
+                    _creator_result_item("douyin", pending, error=message)
+                    for pending in douyin_rows[index:]
+                ] + [
+                    _creator_result_item("youtube", pending, error=message)
+                    for pending in youtube_rows
+                ]
                 return CreatorRefreshSummary(
                     total=total,
                     refreshed=refreshed,
                     failed=(len(douyin_rows) + len(youtube_rows)) - refreshed,
                     skipped=stopped_count,
+                    failures=failures + remaining_failures,
+                    skipped_details=skipped_details,
                 )
             failed += 1
+            failures.append(_creator_result_item("douyin", row, error=message))
             logger.warning(
                 "creator refresh failed for creator_id=%s sec_uid=%s: %s",
                 creator_id,
@@ -128,22 +168,26 @@ async def refresh_all_creators(*, max_videos: int) -> CreatorRefreshSummary:
         refreshed += 1
 
     if youtube_rows:
-        from voxpress.youtube_sync import sync_youtube_channel_by_id
+        from voxpress.youtube_sync import refresh_youtube_channel_by_id
 
-        for creator_id, channel_id in youtube_rows:
+        for row in youtube_rows:
+            creator_id = row.id
+            channel_id = row.external_id
             try:
-                _creator, _fetched, task_ids = await sync_youtube_channel_by_id(
+                _creator, _fetched, task_ids = await refresh_youtube_channel_by_id(
                     channel_id,
                     max_videos=max_videos,
                     prune_missing=False,
                 )
             except Exception as e:  # noqa: BLE001
+                message = _error_message(e)
                 failed += 1
+                failures.append(_creator_result_item("youtube", row, error=message))
                 logger.warning(
                     "youtube creator refresh failed for creator_id=%s channel_id=%s: %s",
                     creator_id,
                     channel_id,
-                    e,
+                    message,
                 )
                 continue
             auto_tasks += len(task_ids)
@@ -155,6 +199,8 @@ async def refresh_all_creators(*, max_videos: int) -> CreatorRefreshSummary:
         failed=failed,
         skipped=skipped,
         auto_tasks=auto_tasks,
+        failures=failures,
+        skipped_details=skipped_details,
     )
 
 
@@ -179,6 +225,31 @@ async def _create_auto_tasks_for_new_videos(s: AsyncSession, new_videos: Sequenc
 def _looks_like_cookie_issue(message: str) -> bool:
     low = message.lower()
     return "cookie" in low or "登录" in message or "过期" in message
+
+
+def _creator_result_item(
+    platform: str,
+    row: object,
+    *,
+    error: str | None = None,
+    reason: str | None = None,
+) -> dict[str, object]:
+    item: dict[str, object] = {
+        "creator_id": getattr(row, "id"),
+        "platform": platform,
+        "name": getattr(row, "name"),
+        "handle": getattr(row, "handle"),
+    }
+    if error:
+        item["error"] = error
+    if reason:
+        item["reason"] = reason
+    return item
+
+
+def _error_message(exc: Exception) -> str:
+    message = str(exc).strip()
+    return message or exc.__class__.__name__
 
 
 async def _upsert_creator(s: AsyncSession, c: ScrapedCreator) -> Creator:

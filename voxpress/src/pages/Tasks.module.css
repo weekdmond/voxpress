@@ -427,6 +427,10 @@
 .sysRow {
   grid-template-columns: 12px 120px minmax(260px, 1.5fr) 160px 100px 120px;
 }
+.sysRowOpen {
+  background: var(--vp-bg-2);
+  border-bottom-color: transparent;
+}
 .sort {
   display: inline-flex;
   align-items: center;
@@ -559,6 +563,80 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.sysDetailToggle {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid rgba(244, 63, 94, 0.2);
+  border-radius: 999px;
+  background: rgba(244, 63, 94, 0.08);
+  color: var(--vp-danger);
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sysDetailToggle:hover {
+  border-color: rgba(244, 63, 94, 0.36);
+  background: rgba(244, 63, 94, 0.12);
+}
+.sysDetailToggle span {
+  font-family: var(--vp-font-mono);
+  font-weight: 500;
+  opacity: 0.75;
+}
+.sysDetails {
+  min-width: 980px;
+  padding: 0 16px 14px 162px;
+  border-bottom: 1px solid var(--vp-line-2);
+  background: var(--vp-bg-2);
+  display: grid;
+  gap: 10px;
+}
+.sysDetailSection {
+  display: grid;
+  gap: 8px;
+}
+.sysDetailTitle {
+  font-size: 10.5px;
+  color: var(--vp-ink-4);
+  font-family: var(--vp-font-mono);
+  letter-spacing: 0.04em;
+}
+.sysDetailItem {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px;
+  border: 1px solid var(--vp-line);
+  border-radius: 12px;
+  background: var(--vp-panel);
+}
+.sysDetailBadge {
+  width: fit-content;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--vp-accent-soft);
+  color: var(--vp-accent-2);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.sysDetailItem b {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--vp-ink);
+  font-size: 12px;
+}
+.sysDetailItem p {
+  margin: 0;
+  color: var(--vp-ink-3);
+  font-family: var(--vp-font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-word;
 }
 .articleTitle {
   font-weight: 500;
@@ -870,6 +948,17 @@
     border-radius: 16px;
     background: var(--vp-panel);
     box-shadow: var(--vp-shadow-sm);
+  }
+
+  .sysDetails {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .sysDetailItem {
+    grid-template-columns: 1fr;
   }
 
   .tRow:hover {

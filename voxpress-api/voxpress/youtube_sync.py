@@ -93,6 +93,78 @@ async def sync_youtube_channel_by_id(
     )
 
 
+async def refresh_youtube_channel_by_id(
+    channel_id: str,
+    *,
+    max_videos: int | None,
+    prune_missing: bool = False,
+) -> tuple[Creator, int, list[UUID]]:
+    """Refresh a known YouTube source from RSS without re-parsing the channel page."""
+    rss_videos = await fetch_channel_feed(channel_id, max_videos=max_videos)
+    async with session_scope() as s:
+        existing = await s.scalar(
+            select(Creator).where(
+                Creator.platform == "youtube",
+                Creator.external_id == channel_id,
+            )
+        )
+        if existing is None:
+            raise RuntimeError(f"YouTube 来源不存在:{channel_id}")
+        channel = YouTubeChannelInfo(
+            channel_id=existing.external_id,
+            handle=existing.handle,
+            name=existing.name,
+            bio=existing.bio,
+            region=existing.region,
+            avatar_url=existing.avatar_url,
+            followers=existing.followers,
+            video_count=existing.video_count,
+        )
+        videos = _videos_from_rss(channel, rss_videos)
+        creator = await upsert_youtube_channel(s, channel)
+        await s.flush()
+        new_videos: list[Video] = []
+        for item in videos:
+            new_video = await upsert_youtube_video(s, creator.id, item)
+            if new_video is not None:
+                new_videos.append(new_video)
+        if prune_missing:
+            await _prune_stale_videos(s, creator.id, [item.id for item in videos])
+        creator.video_count = max(channel.video_count, len(videos))
+        tasks = await _create_auto_tasks(s, new_videos)
+        task_ids = [task.id for task in tasks]
+        await s.flush()
+        creator_id = creator.id
+
+    for task_id in task_ids:
+        await emit_task_create(task_id)
+
+    async with session_scope() as s:
+        stored_creator = await s.get(Creator, creator_id)
+        if stored_creator is None:
+            raise RuntimeError(f"YouTube creator {creator_id} missing after refresh")
+        return stored_creator, len(videos), task_ids
+
+
+def _videos_from_rss(channel: YouTubeChannelInfo, rss_videos: Sequence) -> list[YouTubeVideoInfo]:
+    return [
+        YouTubeVideoInfo(
+            id=item.id,
+            external_id=item.external_id,
+            title=item.title,
+            duration_sec=0,
+            plays=0,
+            likes=0,
+            comments=0,
+            cover_url=f"https://i.ytimg.com/vi/{item.external_id}/hqdefault.jpg",
+            source_url=item.source_url,
+            published_at=item.published_at,
+            channel=channel,
+        )
+        for item in rss_videos
+    ]
+
+
 async def upsert_youtube_channel(s: AsyncSession, channel: YouTubeChannelInfo) -> Creator:
     now = datetime.now(tz=timezone.utc)
     existing = await s.scalar(

@@ -49,6 +49,7 @@ async def _execute_run(run_id: UUID, *, recent_count: int) -> None:
             run_id,
             status=status,
             detail=detail,
+            result=summary.result(),
             total_items=summary.total,
             processed_items=summary.refreshed,
             failed_items=summary.failed,
@@ -76,6 +77,7 @@ async def _execute_run(run_id: UUID, *, recent_count: int) -> None:
             status="failed",
             detail="刷新循环异常退出",
             error=str(exc),
+            result={"failures": [{"error": str(exc) or exc.__class__.__name__}]},
         )
 
 

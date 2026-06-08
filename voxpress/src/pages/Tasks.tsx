@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -14,6 +14,7 @@ import { subscribeTasks } from '@/lib/sse';
 import type {
   Page as ApiPage,
   SystemJobRun,
+  SystemJobResultItem,
   SystemJobStatus,
   SystemJobSummary,
   Task,
@@ -171,6 +172,31 @@ function systemTriggerLabel(kind: SystemJobRun['trigger_kind']): string {
   if (kind === 'manual') return '手动执行';
   if (kind === 'auto') return '自动触发';
   return '定时执行';
+}
+
+function platformLabel(platform: string | undefined): string {
+  if (platform === 'douyin') return '抖音';
+  if (platform === 'youtube') return 'YouTube';
+  return platform || '来源';
+}
+
+function systemResultItems(job: SystemJobRun, key: 'failures' | 'skipped'): SystemJobResultItem[] {
+  const items = job.result?.[key];
+  return Array.isArray(items) ? items : [];
+}
+
+function systemResultMessage(item: SystemJobResultItem): string {
+  return item.error || item.reason || '暂无详细原因';
+}
+
+function compactSystemError(job: SystemJobRun): string | null {
+  const failures = systemResultItems(job, 'failures');
+  if (failures.length > 0) {
+    const first = failures[0];
+    const more = failures.length > 1 ? ` 等 ${failures.length} 个来源` : '';
+    return `${first.name || first.handle || '来源'}${more}: ${systemResultMessage(first)}`;
+  }
+  return job.error;
 }
 
 interface DropdownProps {
@@ -385,6 +411,7 @@ export function TasksPage() {
       : [s.cbx, s.cbxIndet].join(' ');
 
   const [drawerId, setDrawerId] = useState<string | null>(null);
+  const [expandedSystemJobId, setExpandedSystemJobId] = useState<string | null>(null);
 
   const [openDrop, setOpenDrop] = useState<string | null>(null);
   useEffect(() => {
@@ -844,38 +871,105 @@ export function TasksPage() {
               {systemJobs.length === 0 ? (
                 <div className={s.emptyBlock}>暂无系统任务记录</div>
               ) : (
-                systemJobs.map((job) => (
-                  <div key={job.id} className={[s.tRow, s.sysRow].join(' ')}>
-                    <span className={[s.stDot, statusDot(job.status)].join(' ')} title={job.status} />
-                    <div className={s.taskId}>
-                      <span className={s.taskIdShort}>{job.id.slice(0, 12)}</span>
-                      <span className={s.taskIdStage}>{systemStageLabel(job.status)}</span>
-                    </div>
-                    <div className={s.sysMain}>
-                      <span className={s.articleTitle}>{job.job_name}</span>
-                      <span className={s.articleAuthor}>
-                        {systemTriggerLabel(job.trigger_kind)} · {job.scope ?? '系统后台任务'}
-                        {job.detail ? ` · ${job.detail}` : ''}
-                      </span>
-                      {job.error ? <span className={s.sysError}>{job.error}</span> : null}
-                    </div>
-                    <div className={s.sysResult}>
-                      <b>
-                        {job.processed_items}/{job.total_items || 0}
-                      </b>
-                      <span className={s.costSub}>
-                        失败 {job.failed_items} · 跳过 {job.skipped_items}
-                      </span>
-                    </div>
-                    <div className={s.num}>{fmtElapsed(job.duration_ms)}</div>
-                    <div className={s.sysWhen}>
-                      <span>{formatDateTime(job.started_at)}</span>
-                      <span className={s.articleAuthor}>
-                        {systemTriggerLabel(job.trigger_kind)} · {formatRelative(job.started_at)}
-                      </span>
-                    </div>
-                  </div>
-                ))
+                systemJobs.map((job) => {
+                  const failures = systemResultItems(job, 'failures');
+                  const skippedItems = systemResultItems(job, 'skipped');
+                  const compactError = compactSystemError(job);
+                  const hasDetails = failures.length > 0 || skippedItems.length > 0 || Boolean(job.error);
+                  const expanded = expandedSystemJobId === job.id;
+                  return (
+                    <Fragment key={job.id}>
+                      <div
+                        className={[s.tRow, s.sysRow, expanded ? s.sysRowOpen : ''].join(' ')}
+                        onClick={() => {
+                          if (hasDetails) setExpandedSystemJobId(expanded ? null : job.id);
+                        }}
+                      >
+                        <span className={[s.stDot, statusDot(job.status)].join(' ')} title={job.status} />
+                        <div className={s.taskId}>
+                          <span className={s.taskIdShort}>{job.id.slice(0, 12)}</span>
+                          <span className={s.taskIdStage}>{systemStageLabel(job.status)}</span>
+                        </div>
+                        <div className={s.sysMain}>
+                          <span className={s.articleTitle}>{job.job_name}</span>
+                          <span className={s.articleAuthor}>
+                            {systemTriggerLabel(job.trigger_kind)} · {job.scope ?? '系统后台任务'}
+                            {job.detail ? ` · ${job.detail}` : ''}
+                          </span>
+                          {compactError ? <span className={s.sysError}>{compactError}</span> : null}
+                          {hasDetails ? (
+                            <button
+                              type="button"
+                              className={s.sysDetailToggle}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedSystemJobId(expanded ? null : job.id);
+                              }}
+                            >
+                              {expanded ? '收起详情' : failures.length > 0 ? '查看失败详情' : '查看详情'}
+                              {failures.length > 0 ? <span>失败 {failures.length}</span> : null}
+                            </button>
+                          ) : null}
+                        </div>
+                        <div className={s.sysResult}>
+                          <b>
+                            {job.processed_items}/{job.total_items || 0}
+                          </b>
+                          <span className={s.costSub}>
+                            失败 {job.failed_items} · 跳过 {job.skipped_items}
+                          </span>
+                        </div>
+                        <div className={s.num}>{fmtElapsed(job.duration_ms)}</div>
+                        <div className={s.sysWhen}>
+                          <span>{formatDateTime(job.started_at)}</span>
+                          <span className={s.articleAuthor}>
+                            {systemTriggerLabel(job.trigger_kind)} · {formatRelative(job.started_at)}
+                          </span>
+                        </div>
+                      </div>
+                      {expanded ? (
+                        <div className={s.sysDetails}>
+                          {failures.length > 0 ? (
+                            <div className={s.sysDetailSection}>
+                              <span className={s.sysDetailTitle}>失败来源</span>
+                              {failures.map((item, idx) => (
+                                <div key={`${item.creator_id ?? item.name ?? 'failure'}-${idx}`} className={s.sysDetailItem}>
+                                  <span className={s.sysDetailBadge}>{platformLabel(item.platform)}</span>
+                                  <div>
+                                    <b>{item.name || item.handle || `来源 ${item.creator_id ?? ''}`}</b>
+                                    <p>{systemResultMessage(item)}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : job.error ? (
+                            <div className={s.sysDetailItem}>
+                              <span className={s.sysDetailBadge}>错误</span>
+                              <div>
+                                <b>任务错误</b>
+                                <p>{job.error}</p>
+                              </div>
+                            </div>
+                          ) : null}
+                          {skippedItems.length > 0 ? (
+                            <div className={s.sysDetailSection}>
+                              <span className={s.sysDetailTitle}>跳过来源</span>
+                              {skippedItems.map((item, idx) => (
+                                <div key={`${item.creator_id ?? item.name ?? 'skipped'}-${idx}`} className={s.sysDetailItem}>
+                                  <span className={s.sysDetailBadge}>{platformLabel(item.platform)}</span>
+                                  <div>
+                                    <b>{item.name || item.handle || `来源 ${item.creator_id ?? ''}`}</b>
+                                    <p>{systemResultMessage(item)}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </Fragment>
+                  );
+                })
               )}
             </>
           )}

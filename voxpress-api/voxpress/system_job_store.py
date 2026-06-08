@@ -132,6 +132,7 @@ async def finish_system_job_run(
     status: str,
     detail: str | None = None,
     error: str | None = None,
+    result: dict | None = None,
     total_items: int = 0,
     processed_items: int = 0,
     failed_items: int = 0,
@@ -145,6 +146,7 @@ async def finish_system_job_run(
         row.status = status
         row.detail = detail
         row.error = error
+        row.result = result or {}
         row.total_items = total_items
         row.processed_items = processed_items
         row.failed_items = failed_items

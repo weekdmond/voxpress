@@ -400,6 +400,7 @@ class SystemJobRunOut(BaseModel):
     scope: str | None = None
     detail: str | None = None
     error: str | None = None
+    result: dict[str, Any] = Field(default_factory=dict)
     total_items: int = 0
     processed_items: int = 0
     failed_items: int = 0

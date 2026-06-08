@@ -364,6 +364,7 @@ class SystemJobRun(Base):
     scope: Mapped[str | None] = mapped_column(Text)
     detail: Mapped[str | None] = mapped_column(Text)
     error: Mapped[str | None] = mapped_column(Text)
+    result: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     total_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     processed_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     failed_items: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
