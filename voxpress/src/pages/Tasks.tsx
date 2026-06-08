@@ -196,7 +196,19 @@ function compactSystemError(job: SystemJobRun): string | null {
     const more = failures.length > 1 ? ` 等 ${failures.length} 个来源` : '';
     return `${first.name || first.handle || '来源'}${more}: ${systemResultMessage(first)}`;
   }
+  if (job.status === 'failed' && job.failed_items > 0 && !job.error) {
+    return '旧版本仅保存了失败数量，未保存单个来源错误详情';
+  }
   return job.error;
+}
+
+function isLegacySystemFailure(job: SystemJobRun): boolean {
+  return (
+    job.status === 'failed' &&
+    job.failed_items > 0 &&
+    !job.error &&
+    systemResultItems(job, 'failures').length === 0
+  );
 }
 
 interface DropdownProps {
@@ -875,7 +887,8 @@ export function TasksPage() {
                   const failures = systemResultItems(job, 'failures');
                   const skippedItems = systemResultItems(job, 'skipped');
                   const compactError = compactSystemError(job);
-                  const hasDetails = failures.length > 0 || skippedItems.length > 0 || Boolean(job.error);
+                  const legacyFailure = isLegacySystemFailure(job);
+                  const hasDetails = failures.length > 0 || skippedItems.length > 0 || Boolean(job.error) || legacyFailure;
                   const expanded = expandedSystemJobId === job.id;
                   return (
                     <Fragment key={job.id}>
@@ -941,6 +954,16 @@ export function TasksPage() {
                                   </div>
                                 </div>
                               ))}
+                            </div>
+                          ) : legacyFailure ? (
+                            <div className={s.sysDetailItem}>
+                              <span className={s.sysDetailBadge}>旧记录</span>
+                              <div>
+                                <b>未保存单项失败详情</b>
+                                <p>
+                                  这条系统任务是在升级前生成的，只记录了失败数量，没有保存具体失败来源。后续新运行会展示每个失败来源和错误原因。
+                                </p>
+                              </div>
                             </div>
                           ) : job.error ? (
                             <div className={s.sysDetailItem}>
