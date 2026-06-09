@@ -421,6 +421,208 @@ curl -s -X PATCH -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: applicat
   "$API/zones/$ZONE_ID/settings/ssl" -d '{"value":"full"}'
 ```
 
+### 9.6 YouTube 任务失败排障(字幕优先 + 音频兜底)
+
+**既有产品契约**
+
+YouTube 转文章的默认策略是:
+
+1. 优先读取 YouTube 字幕或自动字幕。
+2. 字幕可用时直接生成 `TranscriptResult`,跳过音频下载和 ASR。
+3. 字幕不可用时进入音频下载 + DashScope ASR 兜底。
+4. 只有显式关闭 `VOXPRESS_YOUTUBE_AUDIO_ENABLED=false` 时,无字幕视频才应该直接失败。
+
+> 复盘结论:错误信息误导时,优先修阶段详情、日志和检测项;不要把"可观测性问题"误改成"产品策略变更"。默认策略、兜底路径、模型路由、成本路径都属于产品行为变更,修改前必须先确认。
+
+**2026-06-09 事故复盘**
+
+现象:
+
+- 多个 YouTube 任务卡在 `transcribe` 失败。
+- 旧错误多为 `YouTube 音频下载失败`、`Unable to connect to proxy`、`Requested format is not available`。
+- 修复过程中曾误把默认策略改成字幕-only,导致无字幕视频直接失败。
+
+根因链路:
+
+1. `settings.youtube_proxy.url` 一度为空,App 没有走代理,直连 YouTube 触发 `Sign in to confirm you're not a bot`。
+2. DB/代理机上的 `mihomo` 进程是 active,端口也 open,但当时默认上游节点 `Relay-HK1` 不可用;表现为 `HTTP/1.1 200 Connection established` 后 TLS 失败。
+3. 切换并持久化到可用节点 `Relay-SG1` 后,App 经代理访问 YouTube `generate_204` 恢复 204。
+4. 部分视频确实没有字幕(`subtitles=[]`, `automatic_captions=[]`),这时应进入音频兜底,而不是直接失败。
+5. 最终恢复 `youtube_audio_enabled=True`,并增加阶段详情:
+   - 运行中:`YouTube 未检测到可用字幕，切换音频下载与 ASR 转写`
+   - 阶段完成:`YouTube 无字幕，音频转写完成 · N 段`
+
+验证样本:
+
+- 有字幕样本:原失败任务 `d1736584-f7d4-4a5a-9bfb-0a5d44dca953` 重跑为 `1464d8b1-4724-4aea-812d-83fe6ab2e014`,成功生成文章 `30a1879a-0510-4dfb-8278-f430c6f51b56`。
+- 无字幕样本:原失败任务 `a8c49ebb-f3e2-4cd5-8705-ab98aeca2134` 重跑为 `0887d89c-ba7c-4c31-b091-719b98927110`,通过音频兜底成功生成文章 `cf6c8e86-487c-4d0b-b4ca-98484bd92c91`。
+
+**排障顺序**
+
+1. 先看任务错误,判断是代理/Cookie/字幕/音频/ASR/保存哪个层面:
+
+```bash
+curl -fsS 'https://app.speechfolio.com/api/tasks?status=failed&limit=30' \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s); for (const t of j.items||[]) console.log(JSON.stringify({id:t.id,stage:t.stage,status:t.status,source_url:t.source_url,title:t.title_guess,error:t.error,detail:t.detail,updated_at:t.updated_at},null,0));})'
+```
+
+2. 检查 App 设置是否真的启用了 YouTube 代理和 Cookie:
+
+```bash
+curl -fsS https://app.speechfolio.com/api/settings \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{const j=JSON.parse(s); console.log(JSON.stringify({youtube_proxy:j.youtube_proxy,youtube_cookie:{status:j.youtube_cookie?.status,last_tested_at:j.youtube_cookie?.last_tested_at,source_name:j.youtube_cookie?.source_name}},null,2));})'
+```
+
+期望:
+
+```json
+{
+  "youtube_proxy": {"url": "http://192.168.233.52:7890"},
+  "youtube_cookie": {"status": "ok"}
+}
+```
+
+3. 从 App ECS 验证服务和代理链路:
+
+```bash
+APP_IP=47.236.229.26
+ssh -i ~/.ssh/tflyer-sg-inter-ssh-key-423.pem root@$APP_IP \
+  'systemctl is-active voxpress-api voxpress-worker nginx;
+   curl -I -m 15 -sS -x http://192.168.233.52:7890 https://www.youtube.com/generate_204 | sed -n "1,8p"'
+```
+
+期望看到 `HTTP/2 204`。如果端口 open 但 TLS 失败,继续查 DB/代理机的 `mihomo`。
+
+4. 从 DB/代理机检查 `mihomo` 进程、监听和 UFW:
+
+```bash
+DB_IP=43.98.194.178
+ssh -i ~/.ssh/tflyer-sg-inter-ssh-key-423.pem root@$DB_IP \
+  'systemctl is-active mihomo;
+   ss -ltnp | grep -E ":(7890|7891)";
+   ufw status numbered'
+```
+
+注意:不要直接 `cat /etc/mihomo/config.yaml`,里面包含上游节点密码。需要看配置时只输出摘要。
+
+5. 检查 `mihomo` 当前选择节点和健康状态(不打印密钥):
+
+```bash
+ssh -i ~/.ssh/tflyer-sg-inter-ssh-key-423.pem root@$DB_IP 'python3 - <<'"'"'PY'"'"'
+import json, re, urllib.request
+from pathlib import Path
+text = Path("/etc/mihomo/config.yaml").read_text()
+secret = re.search(r"^secret:\s*\"?([^\"\n]+)\"?", text, re.M).group(1)
+req = urllib.request.Request(
+    "http://127.0.0.1:19090/proxies",
+    headers={"Authorization": "Bearer " + secret},
+)
+with urllib.request.urlopen(req, timeout=10) as r:
+    proxies = json.loads(r.read())["proxies"]
+for group in ("Proxy", "Streaming", "AI", "MATCH"):
+    p = proxies.get(group) or {}
+    print("group", group, "now", p.get("now"), "type", p.get("type"))
+PY'
+```
+
+如果当前节点不可用,先临时切到一个延迟探测可用的节点:
+
+```bash
+ssh -i ~/.ssh/tflyer-sg-inter-ssh-key-423.pem root@$DB_IP 'python3 - <<'"'"'PY'"'"'
+import json, re, urllib.parse, urllib.request
+from pathlib import Path
+text = Path("/etc/mihomo/config.yaml").read_text()
+secret = re.search(r"^secret:\s*\"?([^\"\n]+)\"?", text, re.M).group(1)
+base = "http://127.0.0.1:19090"
+headers = {"Authorization": "Bearer " + secret, "Content-Type": "application/json"}
+name = "🇸🇬 Relay-SG1"
+req = urllib.request.Request(
+    base + "/proxies/" + urllib.parse.quote("Proxy", safe=""),
+    data=json.dumps({"name": name}).encode(),
+    headers=headers,
+    method="PUT",
+)
+urllib.request.urlopen(req, timeout=10).read()
+print("Proxy switched to", name)
+PY'
+```
+
+若确认默认节点失效,需要调整 `/etc/mihomo/config.yaml` 里 `Proxy` 组节点顺序,备份后让可用节点排第一,再 `systemctl restart mihomo` 并复测 `generate_204`。
+
+6. 检查某个视频是否有字幕。无字幕不是故障,应该进入音频兜底:
+
+```bash
+APP_IP=47.236.229.26
+URL='https://www.youtube.com/watch?v=VIDEO_ID'
+ssh -i ~/.ssh/tflyer-sg-inter-ssh-key-423.pem root@$APP_IP \
+  "cd /home/work/app/voxpress-api && sudo -u work .venv/bin/python - <<'PY'
+import asyncio, yt_dlp
+from voxpress.pipeline.youtube_ytdlp import load_youtube_cookie_text, load_youtube_proxy_url, _youtube_cookie_opts, _base_ytdlp_opts
+url = '$URL'
+async def main():
+    cookie = await load_youtube_cookie_text()
+    proxy = await load_youtube_proxy_url()
+    with _youtube_cookie_opts(cookie) as cookie_opts:
+        opts = {**_base_ytdlp_opts(proxy), **cookie_opts, 'skip_download': True, 'noplaylist': True, 'ignore_no_formats_error': True}
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    print('title', info.get('title'))
+    print('subtitles', sorted((info.get('subtitles') or {}).keys()))
+    print('automatic_captions', sorted((info.get('automatic_captions') or {}).keys()))
+asyncio.run(main())
+PY"
+```
+
+7. 如果视频无字幕,继续确认是否有可下载媒体格式。只要有音频或带音轨的 mp4,就应能进入 ASR:
+
+```bash
+ssh -i ~/.ssh/tflyer-sg-inter-ssh-key-423.pem root@$APP_IP \
+  "cd /home/work/app/voxpress-api && sudo -u work .venv/bin/python - <<'PY'
+import asyncio, yt_dlp
+from voxpress.pipeline.youtube_ytdlp import load_youtube_cookie_text, load_youtube_proxy_url, _youtube_cookie_opts, _base_ytdlp_opts
+url = '$URL'
+async def main():
+    cookie = await load_youtube_cookie_text()
+    proxy = await load_youtube_proxy_url()
+    with _youtube_cookie_opts(cookie) as cookie_opts:
+        opts = {**_base_ytdlp_opts(proxy), **cookie_opts, 'skip_download': True, 'noplaylist': True, 'format': 'bestaudio/best'}
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    formats = info.get('formats') or []
+    audio = [f for f in formats if f.get('acodec') not in (None, 'none')]
+    print('formats', len(formats), 'audio', len(audio), 'selected', info.get('format_id'), info.get('ext'))
+    print([(f.get('format_id'), f.get('ext'), f.get('acodec'), f.get('abr')) for f in audio[:5]])
+asyncio.run(main())
+PY"
+```
+
+8. 重跑并盯到终态:
+
+```bash
+TASK_ID='failed-task-id'
+curl -sS -X POST https://app.speechfolio.com/api/tasks/rerun \
+  -H 'Content-Type: application/json' \
+  -d "{\"task_ids\":[\"$TASK_ID\"],\"mode\":\"resume\"}"
+```
+
+期望无字幕视频运行中出现:
+
+```text
+YouTube 未检测到可用字幕，切换音频下载与 ASR 转写
+```
+
+成功后任务详情 `stage_runs` 应显示:
+
+```text
+YouTube 无字幕，音频转写完成 · N 段
+```
+
+**修复前必须做的判断**
+
+- 如果只是错误信息不清楚,只改错误信息、stage detail、日志、设置页检测,不要改默认策略。
+- 如果要改 `youtube_audio_enabled` 默认值,必须先确认这是产品策略变更,并用有字幕、无字幕可下载音频、无字幕且不可下载音频三类样本验证。
+- Cookie 测试只能说明当前样本可以读元数据/字幕,不能等价于所有视频都能成功;任务最终仍取决于单个视频是否有字幕、是否可下载媒体、ASR 是否成功。
+
 ---
 
 ## 10. 已知风险 / 待办
