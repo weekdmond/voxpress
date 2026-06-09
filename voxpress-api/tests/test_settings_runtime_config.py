@@ -63,6 +63,24 @@ def test_normalize_settings_dict_exposes_configured_flags_without_leaking_secret
     assert dumped["topic_taxonomy"]["synonyms"]
 
 
+def test_normalize_settings_dict_accepts_postgres_datetime_text() -> None:
+    normalized = _normalize_settings_dict(
+        {
+            "youtube_cookie": {
+                "status": "expired",
+                "source_name": "www.youtube.com_cookies.txt",
+                "last_tested_at": "2026-06-08 13:51:44.730296+08",
+            }
+        }
+    )
+
+    out = SettingsOut.model_validate(normalized)
+    dumped = out.model_dump(mode="json")
+
+    assert dumped["youtube_cookie"]["status"] == "expired"
+    assert dumped["youtube_cookie"]["last_tested_at"] == "2026-06-08T05:51:44.730296Z"
+
+
 def test_prepare_settings_value_for_storage_strips_derived_secret_status_fields() -> None:
     assert _prepare_settings_value_for_storage(
         "dashscope",

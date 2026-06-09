@@ -335,13 +335,17 @@ def _normalize_settings_dict(data: dict) -> dict:
     topic_taxonomy["synonyms"] = topic_taxonomy_runtime.synonyms
     normalized["topic_taxonomy"] = topic_taxonomy
 
-    cookie = {**_DEFAULTS.cookie.model_dump(mode="json"), **dict(normalized.get("cookie") or {})}
+    cookie = _normalize_cookie_settings(
+        {**_DEFAULTS.cookie.model_dump(mode="json"), **dict(normalized.get("cookie") or {})}
+    )
     normalized["cookie"] = cookie
 
-    youtube_cookie = {
-        **_DEFAULTS.youtube_cookie.model_dump(mode="json"),
-        **dict(normalized.get("youtube_cookie") or {}),
-    }
+    youtube_cookie = _normalize_cookie_settings(
+        {
+            **_DEFAULTS.youtube_cookie.model_dump(mode="json"),
+            **dict(normalized.get("youtube_cookie") or {}),
+        }
+    )
     normalized["youtube_cookie"] = youtube_cookie
 
     youtube_proxy = {
@@ -489,6 +493,31 @@ def _looks_like_youtube_auth_error(message: str) -> bool:
             "age-restricted",
         )
     )
+
+
+def _normalize_cookie_settings(value: dict) -> dict:
+    normalized = dict(value)
+    tested_at = normalized.get("last_tested_at")
+    normalized["last_tested_at"] = _normalize_datetime_for_settings(tested_at)
+    return normalized
+
+
+def _normalize_datetime_for_settings(value: object) -> str | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        raw = str(value).strip()
+        if not raw:
+            return None
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _sanitize_cookie_payload(
