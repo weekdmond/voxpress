@@ -203,6 +203,7 @@ async def _process_transcribe(task_id: UUID, lease_owner: str, hb: LeaseHeartbea
         whisper_language=whisper_language,
     )
     usage = asr_usage(whisper_model, duration_sec=await runner.task_duration_sec(task_id))
+    done_detail = _transcribe_done_detail(transcript)
     await finish_stage_run(
         task_id,
         lease_owner=lease_owner,
@@ -210,7 +211,7 @@ async def _process_transcribe(task_id: UUID, lease_owner: str, hb: LeaseHeartbea
         status="done",
         provider="dashscope",
         model=whisper_model,
-        detail=f"转写完成 · {len(transcript.segments)} 段",
+        detail=done_detail,
         input_tokens=int(usage["input_tokens"]),
         output_tokens=int(usage["output_tokens"]),
         total_tokens=int(usage["total_tokens"]),
@@ -223,7 +224,7 @@ async def _process_transcribe(task_id: UUID, lease_owner: str, hb: LeaseHeartbea
             lease_owner,
             stage="organize",
             progress=68,
-            detail=f"转写完成 · 跳过纠错 · {len(transcript.segments)} 段",
+            detail=f"{done_detail} · 跳过纠错",
         )
         return
     await _advance(
@@ -231,8 +232,17 @@ async def _process_transcribe(task_id: UUID, lease_owner: str, hb: LeaseHeartbea
         lease_owner,
         stage="correct",
         progress=58,
-        detail=f"转写完成 · {len(transcript.segments)} 段",
+        detail=done_detail,
     )
+
+
+def _transcribe_done_detail(transcript) -> str:
+    source = getattr(transcript, "source", "audio")
+    if source == "youtube_subtitle":
+        return f"YouTube 字幕转写完成 · {len(transcript.segments)} 段"
+    if source == "youtube_audio_fallback":
+        return f"YouTube 无字幕，音频转写完成 · {len(transcript.segments)} 段"
+    return f"转写完成 · {len(transcript.segments)} 段"
 
 
 async def _process_correct(task_id: UUID, lease_owner: str) -> None:

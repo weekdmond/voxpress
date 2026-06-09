@@ -36,6 +36,7 @@ class ExtractorResult:
 class TranscriptResult:
     segments: list[tuple[int, str]]  # (ts_sec, text)
     raw_text: str = ""
+    source: str = "audio"
 
     def __post_init__(self) -> None:
         if not self.raw_text:

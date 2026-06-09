@@ -284,6 +284,7 @@ class TaskRunner:
 
     async def transcribe_inline(self, task_id: UUID) -> TranscriptResult:
         ctx = await self._load_video_context(task_id)
+        youtube_audio_fallback = False
         if ctx.creator.platform == "youtube":
             from voxpress.pipeline.youtube_ytdlp import YouTubeTranscriptError, fetch_transcript
 
@@ -298,6 +299,8 @@ class TaskRunner:
                 return transcript
             if not app_settings.youtube_audio_enabled:
                 raise RuntimeError("YouTube 视频没有可用字幕；当前仅使用 YouTube 字幕转写，不会自动下载音频")
+            youtube_audio_fallback = True
+            await self._set_task_detail(task_id, "YouTube 未检测到可用字幕，切换音频下载与 ASR 转写")
 
         audio_path = await self.prepare_audio(task_id)
         audio_object_key = ctx.video.audio_object_key
@@ -326,15 +329,24 @@ class TaskRunner:
         language = await self.current_whisper_language()
         initial_prompt = await self.build_initial_prompt(task_id)
         try:
-            return await transcriber.transcribe(
+            transcript = await transcriber.transcribe(
                 audio_path,
                 language=language,
                 initial_prompt=initial_prompt,
             )
+            if youtube_audio_fallback:
+                transcript.source = "youtube_audio_fallback"
+            return transcript
         finally:
             if await media_store.is_enabled() and audio_path.exists():
                 with contextlib.suppress(OSError):
                     audio_path.unlink()
+
+    async def _set_task_detail(self, task_id: UUID, detail: str) -> None:
+        async with session_scope() as s:
+            task = await s.get(Task, task_id)
+            if task is not None:
+                task.detail = detail
 
     async def build_initial_prompt(self, task_id: UUID) -> str | None:
         if not await self.enable_initial_prompt():

@@ -801,7 +801,7 @@ def _parse_json3(path: Path) -> TranscriptResult | None:
             continue
         ts = int((event.get("tStartMs") or 0) / 1000)
         segments.append((ts, text))
-    return TranscriptResult(segments=segments) if segments else None
+    return TranscriptResult(segments=segments, source="youtube_subtitle") if segments else None
 
 
 def _parse_vtt(path: Path) -> TranscriptResult | None:
@@ -832,7 +832,7 @@ def _parse_vtt(path: Path) -> TranscriptResult | None:
             current_text.append(cleaned)
     if current_text:
         segments.append((current_ts, " ".join(current_text).strip()))
-    return TranscriptResult(segments=segments) if segments else None
+    return TranscriptResult(segments=segments, source="youtube_subtitle") if segments else None
 
 
 def _parse_vtt_ts(raw: str) -> int:
