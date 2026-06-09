@@ -11,7 +11,12 @@ from voxpress.errors import CookieInvalid, CookieMissing, InvalidCookieFile
 from voxpress.creator_sync import fetch_creator_page
 from voxpress.models import Creator, SettingEntry, Video
 from voxpress.pipeline.douyin_video import probe_video_access
-from voxpress.pipeline.youtube_ytdlp import YouTubeExtractError, probe_video_metadata_for_cookie_test
+from voxpress.pipeline.youtube_ytdlp import (
+    YouTubeExtractError,
+    YouTubeTranscriptError,
+    probe_video_metadata_for_cookie_test,
+    probe_video_transcript_for_cookie_test,
+)
 from voxpress.prompts import DEFAULT_CORRECTOR_TEMPLATE
 from voxpress.runtime_settings import (
     build_dashscope_runtime_settings,
@@ -228,11 +233,42 @@ async def test_youtube_cookie(s: AsyncSession = Depends(get_session)) -> dict:
             "detail": f"YouTube Cookie 已保存；样本元信息探测遇到非登录错误: {str(e)[:160]}",
         }
 
+    try:
+        transcript = await probe_video_transcript_for_cookie_test(sample_video_url, cookie_text=cookie_text)
+    except YouTubeTranscriptError as e:
+        status = "expired" if _looks_like_youtube_auth_error(str(e)) else "ok"
+        await _save_cookie_test_result(s, current, key="youtube_cookie", status=status, checked_at=checked_at)
+        await s.commit()
+        if status == "expired":
+            raise CookieInvalid(str(e)) from e
+        return {
+            "status": "ok",
+            "detail": f"YouTube Cookie 可读取元数据；样本字幕读取失败: {str(e)[:140]}",
+            "video_sample": video.title,
+        }
+    except Exception as e:
+        status = "expired" if _looks_like_youtube_auth_error(str(e)) else "ok"
+        await _save_cookie_test_result(s, current, key="youtube_cookie", status=status, checked_at=checked_at)
+        await s.commit()
+        if status == "expired":
+            raise CookieInvalid(str(e)) from e
+        return {
+            "status": "ok",
+            "detail": f"YouTube Cookie 可读取元数据；样本字幕探测遇到非登录错误: {str(e)[:140]}",
+            "video_sample": video.title,
+        }
+
     await _save_cookie_test_result(s, current, key="youtube_cookie", status="ok", checked_at=checked_at)
     await s.commit()
+    if transcript is None:
+        return {
+            "status": "ok",
+            "detail": "YouTube Cookie 可读取元数据；样本未检测到可用字幕，无字幕视频会直接失败",
+            "video_sample": video.title,
+        }
     return {
         "status": "ok",
-        "detail": "YouTube 登录 Cookie 可用于读取视频元数据",
+        "detail": f"YouTube Cookie 可读取元数据和字幕 · 样本字幕 {len(transcript.segments)} 段",
         "video_sample": video.title,
     }
 

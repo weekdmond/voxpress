@@ -479,7 +479,7 @@ export async function handleRequest(method: Method, rawPath: string, body?: unkn
         last_tested_at: new Date().toISOString(),
       },
     });
-    return delay({ status: 'ok', detail: 'YouTube 登录 Cookie 可用于读取视频元数据' });
+    return delay({ status: 'ok', detail: 'YouTube Cookie 可读取元数据和字幕 · 样本字幕 42 段' });
   }
 
   if (method === 'GET' && path === '/api/models') {

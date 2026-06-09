@@ -28,6 +28,10 @@ class YouTubeExtractError(RuntimeError):
     pass
 
 
+class YouTubeTranscriptError(YouTubeExtractError):
+    pass
+
+
 @dataclass(frozen=True)
 class YouTubeChannelInfo:
     channel_id: str
@@ -82,6 +86,11 @@ async def fetch_channel_videos(url: str, *, max_videos: int | None) -> tuple[You
 
 async def fetch_transcript(url: str) -> TranscriptResult | None:
     cookie_text = await load_youtube_cookie_text()
+    proxy_url = await load_youtube_proxy_url()
+    return await asyncio.to_thread(_fetch_transcript_sync, url, cookie_text, proxy_url)
+
+
+async def probe_video_transcript_for_cookie_test(url: str, cookie_text: str) -> TranscriptResult | None:
     proxy_url = await load_youtube_proxy_url()
     return await asyncio.to_thread(_fetch_transcript_sync, url, cookie_text, proxy_url)
 
@@ -330,12 +339,18 @@ def _fetch_transcript_sync(
     video_id = info.external_id or "youtube"
     settings.audio_dir.mkdir(parents=True, exist_ok=True)
     subtitle_template = str(settings.audio_dir / f"youtube_{video_id}.%(ext)s")
+    for existing in settings.audio_dir.glob(f"youtube_{video_id}.*"):
+        try:
+            existing.unlink()
+        except OSError:
+            pass
     with _youtube_cookie_opts(cookie_text) as cookie_opts:
         opts = {
             **_base_ytdlp_opts(proxy_url),
             **cookie_opts,
             "skip_download": True,
             "noplaylist": True,
+            "ignore_no_formats_error": True,
             "writesubtitles": True,
             "writeautomaticsub": True,
             "subtitleslangs": ["zh-Hans", "zh-CN", "zh", "en"],
@@ -345,8 +360,8 @@ def _fetch_transcript_sync(
         with yt_dlp.YoutubeDL(opts) as ydl:
             try:
                 ydl.extract_info(url, download=True)
-            except Exception:
-                return None
+            except Exception as exc:  # noqa: BLE001
+                raise YouTubeTranscriptError(f"YouTube 字幕读取失败:{str(exc)[:200]}") from exc
 
     candidates = sorted(settings.audio_dir.glob(f"youtube_{video_id}.*"))
     for candidate in candidates:

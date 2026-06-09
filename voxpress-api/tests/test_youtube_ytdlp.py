@@ -1,9 +1,16 @@
 from datetime import datetime, timezone
+import sys
+from types import SimpleNamespace
 
+import pytest
+
+from voxpress.pipeline.protocols import TranscriptResult
 from voxpress.pipeline.youtube_ytdlp import (
     YouTubeChannelInfo,
     YouTubeExtractor,
+    YouTubeTranscriptError,
     YouTubeVideoInfo,
+    _fetch_transcript_sync,
     _channel_tab_urls,
     _channel_videos_url,
     _base_ytdlp_opts,
@@ -17,6 +24,7 @@ from voxpress.pipeline.youtube_ytdlp import (
     _enrich_video_info,
     _write_youtube_cookie_file,
     probe_video_metadata_for_cookie_test,
+    probe_video_transcript_for_cookie_test,
 )
 
 
@@ -245,3 +253,47 @@ async def test_cookie_probe_uses_unprocessed_metadata(monkeypatch) -> None:
 
     assert await probe_video_metadata_for_cookie_test("https://www.youtube.com/watch?v=abc", "SID=one")
     assert calls == [False]
+
+
+async def test_cookie_transcript_probe_uses_cookie_and_proxy(monkeypatch) -> None:
+    transcript = TranscriptResult(segments=[(0, "hello")])
+    calls: list[tuple[str, str | None, str | None]] = []
+
+    def fake_fetch(url: str, cookie_text: str | None = None, proxy_url: str | None = None):
+        calls.append((url, cookie_text, proxy_url))
+        return transcript
+
+    async def fake_proxy_url():
+        return "http://proxy.local:7890"
+
+    monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp._fetch_transcript_sync", fake_fetch)
+    monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp.load_youtube_proxy_url", fake_proxy_url)
+
+    assert await probe_video_transcript_for_cookie_test("https://www.youtube.com/watch?v=abc", "SID=one") is transcript
+    assert calls == [("https://www.youtube.com/watch?v=abc", "SID=one", "http://proxy.local:7890")]
+
+
+def test_fetch_transcript_reports_ytdlp_error_and_ignores_missing_formats(monkeypatch, tmp_path) -> None:
+    captured_opts: dict = {}
+
+    class FakeYoutubeDL:
+        def __init__(self, opts: dict):
+            captured_opts.update(opts)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def extract_info(self, _url: str, *, download: bool):
+            assert download is True
+            raise RuntimeError("Requested format is not available")
+
+    monkeypatch.setitem(sys.modules, "yt_dlp", SimpleNamespace(YoutubeDL=FakeYoutubeDL))
+    monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp.settings.audio_dir", tmp_path)
+
+    with pytest.raises(YouTubeTranscriptError, match="Requested format is not available"):
+        _fetch_transcript_sync("https://www.youtube.com/watch?v=KJ-efTR7WxM", cookie_text="SID=one")
+
+    assert captured_opts["ignore_no_formats_error"] is True

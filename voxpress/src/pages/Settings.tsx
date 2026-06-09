@@ -586,7 +586,7 @@ export function SettingsPage() {
           <div>
             <strong style={{ fontSize: 14 }}>YouTube Cookie</strong>
             <div style={{ color: 'var(--vp-ink-3)', fontSize: 11.5 }}>
-              yt-dlp 下载受限视频音频时使用
+              用于读取 YouTube 登录态、元数据和字幕
             </div>
           </div>
           {youtubeCookieChip}

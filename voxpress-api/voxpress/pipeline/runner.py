@@ -285,13 +285,19 @@ class TaskRunner:
     async def transcribe_inline(self, task_id: UUID) -> TranscriptResult:
         ctx = await self._load_video_context(task_id)
         if ctx.creator.platform == "youtube":
-            from voxpress.pipeline.youtube_ytdlp import fetch_transcript
+            from voxpress.pipeline.youtube_ytdlp import YouTubeTranscriptError, fetch_transcript
 
-            transcript = await fetch_transcript(ctx.video.source_url)
+            try:
+                transcript = await fetch_transcript(ctx.video.source_url)
+            except YouTubeTranscriptError:
+                if not app_settings.youtube_audio_enabled:
+                    raise
+                logger.warning("youtube transcript fetch failed for %s; falling back to audio", ctx.video.id)
+                transcript = None
             if transcript is not None:
                 return transcript
             if not app_settings.youtube_audio_enabled:
-                raise RuntimeError("YouTube 视频没有可用字幕，且当前已关闭音频转写")
+                raise RuntimeError("YouTube 视频没有可用字幕；当前仅使用 YouTube 字幕转写，不会自动下载音频")
 
         audio_path = await self.prepare_audio(task_id)
         audio_object_key = ctx.video.audio_object_key

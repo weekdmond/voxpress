@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     creator_auto_task_recent_count: int = Field(default=1, ge=1, le=20)
     creator_backfill_retry_attempts: int = Field(default=20, ge=1, le=240)
     creator_backfill_retry_interval_sec: int = Field(default=30, ge=5, le=3600)
-    youtube_audio_enabled: bool = True
+    youtube_audio_enabled: bool = False
     oss_region: str | None = None
     oss_endpoint: str | None = None
     oss_bucket: str | None = None
