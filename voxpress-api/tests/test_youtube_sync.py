@@ -1,8 +1,14 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+from voxpress.models import Video
 from voxpress.pipeline.youtube_ytdlp import YouTubeChannelInfo
-from voxpress.youtube_sync import _looks_like_refresh_timestamp, _videos_from_rss
+from voxpress.youtube_sync import (
+    _enrich_lightweight_youtube_videos,
+    _looks_like_refresh_timestamp,
+    _videos_from_rss,
+    upsert_youtube_video,
+)
 
 
 def test_refresh_timestamp_detection_only_matches_current_time() -> None:
@@ -38,3 +44,90 @@ def test_videos_from_rss_builds_lightweight_youtube_video_info() -> None:
     assert videos[0].duration_sec == 0
     assert videos[0].cover_url == "https://i.ytimg.com/vi/abc/hqdefault.jpg"
     assert videos[0].channel is channel
+
+
+async def test_enrich_lightweight_youtube_videos_fills_metadata(monkeypatch) -> None:
+    channel = YouTubeChannelInfo(channel_id="UC123", handle="@demo", name="Demo Channel")
+    published_at = datetime(2026, 6, 8, 4, 0, tzinfo=timezone.utc)
+    lightweight = _videos_from_rss(
+        channel,
+        [
+            SimpleNamespace(
+                id="youtube:abc",
+                external_id="abc",
+                title="RSS 视频",
+                source_url="https://www.youtube.com/watch?v=abc",
+                published_at=published_at,
+            )
+        ],
+    )
+
+    async def fake_probe_video(_url: str):
+        item = lightweight[0]
+        return SimpleNamespace(
+            id=item.id,
+            external_id=item.external_id,
+            title="探测标题",
+            duration_sec=734,
+            plays=5400,
+            likes=55,
+            comments=3,
+            cover_url="https://i.ytimg.com/vi/abc/maxresdefault.jpg",
+            source_url=item.source_url,
+            published_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        )
+
+    monkeypatch.setattr("voxpress.youtube_sync.probe_video", fake_probe_video)
+
+    enriched = await _enrich_lightweight_youtube_videos(lightweight)
+
+    assert enriched[0].title == "探测标题"
+    assert enriched[0].duration_sec == 734
+    assert enriched[0].likes == 55
+    assert enriched[0].plays == 5400
+    assert enriched[0].published_at is published_at
+    assert enriched[0].channel is channel
+
+
+async def test_upsert_youtube_video_preserves_existing_metrics_when_refresh_is_lightweight() -> None:
+    existing = Video(
+        id="youtube:abc",
+        creator_id=1,
+        title="旧标题",
+        duration_sec=734,
+        likes=55,
+        plays=5400,
+        comments=8,
+        cover_url="old.jpg",
+        source_url="https://www.youtube.com/watch?v=abc",
+        published_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+
+    class FakeSession:
+        async def get(self, _model, _id):
+            return existing
+
+    channel = YouTubeChannelInfo(channel_id="UC123", handle="@demo", name="Demo Channel")
+    lightweight = _videos_from_rss(
+        channel,
+        [
+            SimpleNamespace(
+                id="youtube:abc",
+                external_id="abc",
+                title="新标题",
+                source_url="https://www.youtube.com/watch?v=abc",
+                published_at=datetime(2026, 6, 8, tzinfo=timezone.utc),
+            )
+        ],
+    )[0]
+
+    result = await upsert_youtube_video(FakeSession(), creator_id=2, video=lightweight)
+
+    assert result is None
+    assert existing.creator_id == 2
+    assert existing.title == "新标题"
+    assert existing.duration_sec == 734
+    assert existing.likes == 55
+    assert existing.plays == 5400
+    assert existing.comments == 8
+    assert existing.cover_url == "https://i.ytimg.com/vi/abc/hqdefault.jpg"

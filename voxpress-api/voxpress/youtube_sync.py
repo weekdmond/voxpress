@@ -16,6 +16,7 @@ from voxpress.pipeline.youtube_ytdlp import (
     YouTubeChannelInfo,
     YouTubeVideoInfo,
     fetch_channel_videos,
+    probe_video,
     resolve_channel,
 )
 from voxpress.task_store import emit_task_create
@@ -54,6 +55,7 @@ async def sync_youtube_channel(
                         )
                     )
 
+    videos = await _enrich_lightweight_youtube_videos(videos)
     new_videos: list[Video] = []
     async with session_scope() as s:
         creator = await upsert_youtube_channel(s, channel)
@@ -121,6 +123,7 @@ async def refresh_youtube_channel_by_id(
             video_count=existing.video_count,
         )
         videos = _videos_from_rss(channel, rss_videos)
+        videos = await _enrich_lightweight_youtube_videos(videos)
         creator = await upsert_youtube_channel(s, channel)
         await s.flush()
         new_videos: list[Video] = []
@@ -208,11 +211,11 @@ async def upsert_youtube_video(s: AsyncSession, creator_id: int, video: YouTubeV
         published_at = existing.published_at if _looks_like_refresh_timestamp(video.published_at, now) else video.published_at
         existing.creator_id = creator_id
         existing.title = video.title
-        existing.duration_sec = video.duration_sec
-        existing.likes = video.likes
-        existing.plays = video.plays
-        existing.comments = video.comments
-        existing.cover_url = video.cover_url
+        existing.duration_sec = video.duration_sec or existing.duration_sec
+        existing.likes = max(existing.likes or 0, video.likes or 0)
+        existing.plays = max(existing.plays or 0, video.plays or 0)
+        existing.comments = max(existing.comments or 0, video.comments or 0)
+        existing.cover_url = video.cover_url or existing.cover_url
         existing.source_url = video.source_url
         existing.published_at = published_at
         existing.updated_at = now
@@ -234,6 +237,35 @@ async def upsert_youtube_video(s: AsyncSession, creator_id: int, video: YouTubeV
     )
     s.add(row)
     return row
+
+
+async def _enrich_lightweight_youtube_videos(videos: Sequence[YouTubeVideoInfo]) -> list[YouTubeVideoInfo]:
+    enriched: list[YouTubeVideoInfo] = []
+    for video in videos:
+        if video.duration_sec or video.likes or video.plays:
+            enriched.append(video)
+            continue
+        try:
+            probed = await probe_video(video.source_url)
+        except Exception:
+            enriched.append(video)
+            continue
+        enriched.append(
+            YouTubeVideoInfo(
+                id=probed.id or video.id,
+                external_id=probed.external_id or video.external_id,
+                title=probed.title or video.title,
+                duration_sec=probed.duration_sec or video.duration_sec,
+                plays=probed.plays or video.plays,
+                likes=probed.likes or video.likes,
+                comments=probed.comments or video.comments,
+                cover_url=probed.cover_url or video.cover_url,
+                source_url=probed.source_url or video.source_url,
+                published_at=video.published_at,
+                channel=video.channel,
+            )
+        )
+    return enriched
 
 
 def _looks_like_refresh_timestamp(value: datetime, now: datetime) -> bool:
