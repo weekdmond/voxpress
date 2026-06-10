@@ -123,7 +123,15 @@ async def refresh_youtube_channel_by_id(
             video_count=existing.video_count,
         )
         videos = _videos_from_rss(channel, rss_videos)
-        videos = await _enrich_lightweight_youtube_videos(videos)
+        existing_rows = (
+            await s.execute(
+                select(Video.id, Video.duration_sec, Video.likes, Video.plays).where(
+                    Video.id.in_([video.id for video in videos])
+                )
+            )
+        ).all()
+        missing_metadata_ids = _videos_requiring_metadata_probe(videos, existing_rows)
+        videos = await _enrich_lightweight_youtube_videos(videos, probe_ids=missing_metadata_ids)
         creator = await upsert_youtube_channel(s, channel)
         await s.flush()
         new_videos: list[Video] = []
@@ -239,9 +247,24 @@ async def upsert_youtube_video(s: AsyncSession, creator_id: int, video: YouTubeV
     return row
 
 
-async def _enrich_lightweight_youtube_videos(videos: Sequence[YouTubeVideoInfo]) -> list[YouTubeVideoInfo]:
+def _videos_requiring_metadata_probe(videos: Sequence[YouTubeVideoInfo], existing_rows: Sequence) -> set[str]:
+    probe_ids = {video.id for video in videos}
+    for video_id, duration_sec, likes, plays in existing_rows:
+        if duration_sec or likes or plays:
+            probe_ids.discard(video_id)
+    return probe_ids
+
+
+async def _enrich_lightweight_youtube_videos(
+    videos: Sequence[YouTubeVideoInfo],
+    *,
+    probe_ids: set[str] | None = None,
+) -> list[YouTubeVideoInfo]:
     enriched: list[YouTubeVideoInfo] = []
     for video in videos:
+        if probe_ids is not None and video.id not in probe_ids:
+            enriched.append(video)
+            continue
         if video.duration_sec or video.likes or video.plays:
             enriched.append(video)
             continue

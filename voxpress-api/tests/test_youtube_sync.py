@@ -7,6 +7,7 @@ from voxpress.youtube_sync import (
     _enrich_lightweight_youtube_videos,
     _looks_like_refresh_timestamp,
     _videos_from_rss,
+    _videos_requiring_metadata_probe,
     upsert_youtube_video,
 )
 
@@ -87,6 +88,33 @@ async def test_enrich_lightweight_youtube_videos_fills_metadata(monkeypatch) -> 
     assert enriched[0].plays == 5400
     assert enriched[0].published_at is published_at
     assert enriched[0].channel is channel
+
+
+def test_videos_requiring_metadata_probe_skips_rows_with_existing_metrics() -> None:
+    channel = YouTubeChannelInfo(channel_id="UC123", handle="@demo", name="Demo Channel")
+    videos = _videos_from_rss(
+        channel,
+        [
+            SimpleNamespace(
+                id="youtube:has",
+                external_id="has",
+                title="已有元数据",
+                source_url="https://www.youtube.com/watch?v=has",
+                published_at=datetime(2026, 6, 8, tzinfo=timezone.utc),
+            ),
+            SimpleNamespace(
+                id="youtube:missing",
+                external_id="missing",
+                title="缺元数据",
+                source_url="https://www.youtube.com/watch?v=missing",
+                published_at=datetime(2026, 6, 8, tzinfo=timezone.utc),
+            ),
+        ],
+    )
+
+    probe_ids = _videos_requiring_metadata_probe(videos, [("youtube:has", 734, 0, 0)])
+
+    assert probe_ids == {"youtube:missing"}
 
 
 async def test_upsert_youtube_video_preserves_existing_metrics_when_refresh_is_lightweight() -> None:
