@@ -136,13 +136,16 @@ async def _execute_run(run_id: UUID, target: CreatorBackfillTarget) -> None:
                 )
                 return
             async with session_scope() as s:
-                await upsert_scraped_page(s, page, prune_missing=True)
+                # Douyin's web list can omit recent or restricted works even
+                # when the profile count says they exist. Backfill must not
+                # treat omitted rows as deleted content.
+                await upsert_scraped_page(s, page, prune_missing=False)
 
-        total = page.creator.video_count or target.listed_video_count or len(page.videos)
+        total = max(page.creator.video_count or 0, target.listed_video_count or 0, len(page.videos))
         processed = len(page.videos)
         skipped = max(0, total - processed)
         status = "done" if page.complete else "failed"
-        detail = f"补齐 {page.creator.name} · 已入库 {processed}/{total} 条视频"
+        detail = _douyin_backfill_detail(page.creator.name, processed=processed, total=total, complete=page.complete)
         if not page.complete:
             detail = f"{detail} · 抓取中途失败，保留已入库部分"
         await finish_system_job_run(
@@ -258,6 +261,14 @@ async def _retry_start_creator_backfill_run(
         logger.info("creator backfill retry started: creator_id=%s run_id=%s", creator_id, run_id)
         return
     logger.warning("creator backfill retry exhausted: creator_id=%s attempts=%s", creator_id, attempts)
+
+
+def _douyin_backfill_detail(name: str, *, processed: int, total: int, complete: bool) -> str:
+    detail = f"补齐 {name} · 已入库 {processed}/{total} 条视频"
+    missing = max(0, total - processed)
+    if complete and missing:
+        detail = f"{detail} · 抖音接口未返回 {missing} 条，已保留库内已有作品"
+    return detail
 
 
 async def cancel_background_backfills() -> None:

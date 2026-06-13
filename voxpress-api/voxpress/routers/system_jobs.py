@@ -96,6 +96,7 @@ async def list_system_jobs(
     offset: int | None = Query(None, ge=0),
     limit: int = Query(20, ge=1, le=200),
 ) -> Page[SystemJobRunOut]:
+    await recover_stale_system_job_runs()
     clauses = _job_filters(status=status, time_range=time_range or since, q=q)
     total = await s.scalar(select(func.count()).select_from(SystemJobRun).where(*clauses))
     resolved_offset = offset if offset is not None else max(0, (page - 1) * limit)
@@ -123,6 +124,7 @@ async def system_jobs_summary(
     since: str | None = Query(None),
     q: str | None = Query(None),
 ) -> SystemJobSummaryOut:
+    await recover_stale_system_job_runs()
     clauses = _job_filters(status=status, time_range=time_range or since, q=q)
     today_cutoff = _local_now().replace(hour=0, minute=0, second=0, microsecond=0)
     today_runs = int(
