@@ -50,12 +50,18 @@ export function formatRelative(iso: string): string {
 
 export function formatDate(iso: string): string {
   const d = new Date(iso);
+  if (isUnknownDate(d)) return '未知';
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 export function formatDateTime(iso: string): string {
   const d = new Date(iso);
+  if (isUnknownDate(d)) return '未知';
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function isUnknownDate(date: Date): boolean {
+  return Number.isNaN(date.getTime()) || date.getUTCFullYear() <= 1970;
 }
 
 export function formatMoney(n: number): string {
