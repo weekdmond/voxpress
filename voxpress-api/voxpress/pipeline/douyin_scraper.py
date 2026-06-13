@@ -13,9 +13,11 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
 logger = logging.getLogger(__name__)
+
+_POST_PAGE_SIZE = 50
 
 
 @dataclass
@@ -144,21 +146,29 @@ async def scrape_user_page(
     # requests.
     videos: list[ScrapedVideo] = []
     complete = True
+    fetch_limit = _candidate_video_limit(max_videos)
     try:
+        page_index = 0
         async for page in handler.fetch_user_post_videos(
             sec_user_id=sec_uid,
-            max_counts=max_videos,
-            page_counts=50,
+            max_counts=fetch_limit,
+            page_counts=_POST_PAGE_SIZE,
         ):
+            page_index += 1
             for sv in _iter_awemes(page):
                 videos.append(sv)
-                if max_videos is not None and len(videos) >= max_videos:
+                if fetch_limit is not None and len(videos) >= fetch_limit:
                     break
-            if max_videos is not None and len(videos) >= max_videos:
+            if fetch_limit is not None and len(videos) >= fetch_limit:
+                break
+            if max_videos is not None and page_index >= 1 and len(videos) >= max_videos:
                 break
     except Exception as e:
         logger.warning("fetch_user_post_videos partial failure: %s", e)
         complete = False
+
+    if max_videos is not None:
+        videos = _latest_videos_by_publish_time(videos, limit=max_videos)
 
     return ScrapedUserPage(creator=creator, videos=videos, complete=complete)
 
@@ -234,6 +244,23 @@ def _iter_awemes(page: Any) -> list[ScrapedVideo]:
             )
         )
     return out
+
+
+def _candidate_video_limit(max_videos: int | None) -> int | None:
+    if max_videos is None:
+        return None
+    return max(max_videos, _POST_PAGE_SIZE)
+
+
+def _latest_videos_by_publish_time(videos: Sequence[ScrapedVideo], *, limit: int) -> list[ScrapedVideo]:
+    by_id: dict[str, ScrapedVideo] = {}
+    for video in videos:
+        by_id.setdefault(video.id, video)
+    return sorted(
+        by_id.values(),
+        key=lambda video: video.published_at_ts,
+        reverse=True,
+    )[:limit]
 
 
 _TITLE_KEYS = ("desc", "caption", "item_title", "preview_title")

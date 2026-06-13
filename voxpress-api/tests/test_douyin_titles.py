@@ -1,4 +1,9 @@
-from voxpress.pipeline.douyin_scraper import _iter_awemes, _pick_aweme_title
+from voxpress.pipeline.douyin_scraper import (
+    ScrapedVideo,
+    _iter_awemes,
+    _latest_videos_by_publish_time,
+    _pick_aweme_title,
+)
 
 
 def test_pick_aweme_title_prefers_author_desc() -> None:
@@ -114,3 +119,34 @@ def test_iter_awemes_uses_date_fallback_when_no_title_metadata() -> None:
     [video] = _iter_awemes(RawPage())
 
     assert video.title == "2026-04-11 作品 4244"
+
+
+def test_latest_videos_by_publish_time_ignores_pinned_feed_order() -> None:
+    videos = [
+        _video("pinned-2025", 1762107852),
+        _video("pinned-2023", 1684564522),
+        _video("pinned-2025b", 1752318222),
+        _video("new-1", 1780818751),
+        _video("new-2", 1780790214),
+        _video("new-3", 1780693135),
+    ]
+
+    latest = _latest_videos_by_publish_time(videos, limit=3)
+
+    assert [video.id for video in latest] == ["new-1", "new-2", "new-3"]
+
+
+def _video(video_id: str, published_at_ts: int) -> ScrapedVideo:
+    return ScrapedVideo(
+        id=video_id,
+        title=video_id,
+        duration_sec=1,
+        likes=0,
+        plays=0,
+        comments=0,
+        shares=0,
+        collects=0,
+        published_at_ts=published_at_ts,
+        cover_url=None,
+        source_url=f"https://www.douyin.com/video/{video_id}",
+    )
