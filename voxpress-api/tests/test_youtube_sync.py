@@ -6,6 +6,7 @@ from voxpress.pipeline.youtube_ytdlp import YouTubeChannelInfo
 from voxpress.youtube_sync import (
     _enrich_lightweight_youtube_videos,
     _looks_like_refresh_timestamp,
+    _merge_rss_video_metadata,
     _videos_from_rss,
     _videos_requiring_metadata_probe,
     upsert_youtube_video,
@@ -45,6 +46,62 @@ def test_videos_from_rss_builds_lightweight_youtube_video_info() -> None:
     assert videos[0].duration_sec == 0
     assert videos[0].cover_url == "https://i.ytimg.com/vi/abc/hqdefault.jpg"
     assert videos[0].channel is channel
+
+
+def test_merge_rss_video_metadata_preserves_metrics_and_prefers_rss_published_at() -> None:
+    channel = YouTubeChannelInfo(
+        channel_id="UC123",
+        handle="@demo",
+        name="Demo Channel",
+    )
+    fallback_published_at = datetime(2026, 6, 11, 7, 3, tzinfo=timezone.utc)
+    rss_published_at = datetime(2024, 5, 19, 12, 30, tzinfo=timezone.utc)
+    existing = _videos_from_rss(
+        channel,
+        [
+            SimpleNamespace(
+                id="youtube:abc",
+                external_id="abc",
+                title="yt-dlp 标题",
+                source_url="https://www.youtube.com/watch?v=abc",
+                published_at=fallback_published_at,
+            )
+        ],
+    )[0]
+    existing = existing.__class__(
+        id=existing.id,
+        external_id=existing.external_id,
+        title=existing.title,
+        duration_sec=734,
+        plays=5400,
+        likes=55,
+        comments=3,
+        cover_url="https://i.ytimg.com/vi/abc/maxresdefault.jpg",
+        source_url=existing.source_url,
+        published_at=existing.published_at,
+        channel=existing.channel,
+    )
+
+    merged = _merge_rss_video_metadata(
+        channel,
+        [existing],
+        [
+            SimpleNamespace(
+                id="youtube:abc",
+                external_id="abc",
+                title="RSS 标题",
+                source_url="https://www.youtube.com/watch?v=abc",
+                published_at=rss_published_at,
+            )
+        ],
+    )
+
+    assert len(merged) == 1
+    assert merged[0].title == "yt-dlp 标题"
+    assert merged[0].duration_sec == 734
+    assert merged[0].plays == 5400
+    assert merged[0].likes == 55
+    assert merged[0].published_at == rss_published_at
 
 
 async def test_enrich_lightweight_youtube_videos_fills_metadata(monkeypatch) -> None:

@@ -36,24 +36,7 @@ async def sync_youtube_channel(
         except Exception:
             rss_videos = []
         if rss_videos:
-            by_id = {video.id: video for video in videos}
-            for rss_video in rss_videos:
-                if rss_video.id not in by_id:
-                    videos.append(
-                        YouTubeVideoInfo(
-                            id=rss_video.id,
-                            external_id=rss_video.external_id,
-                            title=rss_video.title,
-                            duration_sec=0,
-                            plays=0,
-                            likes=0,
-                            comments=0,
-                            cover_url=f"https://i.ytimg.com/vi/{rss_video.external_id}/hqdefault.jpg",
-                            source_url=rss_video.source_url,
-                            published_at=rss_video.published_at,
-                            channel=channel,
-                        )
-                    )
+            videos = _merge_rss_video_metadata(channel, videos, rss_videos)
 
     videos = await _enrich_lightweight_youtube_videos(videos)
     new_videos: list[Video] = []
@@ -174,6 +157,46 @@ def _videos_from_rss(channel: YouTubeChannelInfo, rss_videos: Sequence) -> list[
         )
         for item in rss_videos
     ]
+
+
+def _merge_rss_video_metadata(
+    channel: YouTubeChannelInfo,
+    videos: Sequence[YouTubeVideoInfo],
+    rss_videos: Sequence,
+) -> list[YouTubeVideoInfo]:
+    """Prefer RSS publication dates while preserving richer yt-dlp metadata."""
+    by_id = {video.id: video for video in videos}
+    for rss_video in rss_videos:
+        existing = by_id.get(rss_video.id)
+        if existing is None:
+            by_id[rss_video.id] = YouTubeVideoInfo(
+                id=rss_video.id,
+                external_id=rss_video.external_id,
+                title=rss_video.title,
+                duration_sec=0,
+                plays=0,
+                likes=0,
+                comments=0,
+                cover_url=f"https://i.ytimg.com/vi/{rss_video.external_id}/hqdefault.jpg",
+                source_url=rss_video.source_url,
+                published_at=rss_video.published_at,
+                channel=channel,
+            )
+            continue
+        by_id[rss_video.id] = YouTubeVideoInfo(
+            id=existing.id,
+            external_id=existing.external_id or rss_video.external_id,
+            title=existing.title or rss_video.title,
+            duration_sec=existing.duration_sec,
+            plays=existing.plays,
+            likes=existing.likes,
+            comments=existing.comments,
+            cover_url=existing.cover_url or f"https://i.ytimg.com/vi/{rss_video.external_id}/hqdefault.jpg",
+            source_url=existing.source_url or rss_video.source_url,
+            published_at=rss_video.published_at,
+            channel=existing.channel or channel,
+        )
+    return sorted(by_id.values(), key=lambda item: item.published_at, reverse=True)
 
 
 async def upsert_youtube_channel(s: AsyncSession, channel: YouTubeChannelInfo) -> Creator:
