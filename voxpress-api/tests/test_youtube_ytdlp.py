@@ -10,6 +10,7 @@ from voxpress.pipeline.youtube_ytdlp import (
     YouTubeExtractor,
     YouTubeTranscriptError,
     YouTubeVideoInfo,
+    UNKNOWN_YOUTUBE_PUBLISHED_AT,
     _fetch_transcript_sync,
     _channel_tab_urls,
     _channel_videos_url,
@@ -22,6 +23,7 @@ from voxpress.pipeline.youtube_ytdlp import (
     _parse_json_string_field,
     _parse_video_published_at_html,
     _enrich_video_info,
+    _video_from_info,
     _write_youtube_cookie_file,
     probe_video_metadata_for_cookie_test,
     probe_video_transcript_for_cookie_test,
@@ -69,6 +71,12 @@ def test_parse_video_published_at_html_reads_youtube_publish_date() -> None:
 
     assert published is not None
     assert published.astimezone(timezone.utc).isoformat() == "2026-04-24T11:00:21+00:00"
+
+
+def test_video_from_info_uses_unknown_publish_time_when_metadata_missing() -> None:
+    video = _video_from_info({"id": "KJ-efTR7WxM", "title": "Missing date"})
+
+    assert video.published_at == UNKNOWN_YOUTUBE_PUBLISHED_AT
 
 
 def test_channel_from_info_reads_description_and_best_avatar() -> None:

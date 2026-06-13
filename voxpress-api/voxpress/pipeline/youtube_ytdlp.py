@@ -32,6 +32,9 @@ class YouTubeTranscriptError(YouTubeExtractError):
     pass
 
 
+UNKNOWN_YOUTUBE_PUBLISHED_AT = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
 @dataclass(frozen=True)
 class YouTubeChannelInfo:
     channel_id: str
@@ -209,7 +212,7 @@ def _probe_video_sync(
                     comments=0,
                     cover_url=oembed.thumbnail_url,
                     source_url=oembed.source_url,
-                    published_at=datetime.now(tz=timezone.utc),
+                    published_at=UNKNOWN_YOUTUBE_PUBLISHED_AT,
                     channel=YouTubeChannelInfo(
                         channel_id=oembed.author_url or oembed.author_name,
                         handle=_derive_handle(oembed.author_url, oembed.author_name),
@@ -783,7 +786,7 @@ def _coerce_published_at(info: dict[str, Any]) -> datetime:
             return datetime(int(upload_date[:4]), int(upload_date[4:6]), int(upload_date[6:8]), tzinfo=timezone.utc)
         except ValueError:
             pass
-    return datetime.now(tz=timezone.utc)
+    return UNKNOWN_YOUTUBE_PUBLISHED_AT
 
 
 def _parse_json3(path: Path) -> TranscriptResult | None:

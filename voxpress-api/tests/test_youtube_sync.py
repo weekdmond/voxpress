@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from voxpress.models import Video
-from voxpress.pipeline.youtube_ytdlp import YouTubeChannelInfo
+from voxpress.pipeline.youtube_ytdlp import UNKNOWN_YOUTUBE_PUBLISHED_AT, YouTubeChannelInfo
 from voxpress.youtube_sync import (
     _enrich_lightweight_youtube_videos,
     _looks_like_refresh_timestamp,
@@ -102,6 +102,43 @@ def test_merge_rss_video_metadata_preserves_metrics_and_prefers_rss_published_at
     assert merged[0].plays == 5400
     assert merged[0].likes == 55
     assert merged[0].published_at == rss_published_at
+
+
+def test_merge_rss_video_metadata_sorts_unknown_publish_time_last() -> None:
+    channel = YouTubeChannelInfo(
+        channel_id="UC123",
+        handle="@demo",
+        name="Demo Channel",
+    )
+    unknown_video = _videos_from_rss(
+        channel,
+        [
+            SimpleNamespace(
+                id="youtube:unknown",
+                external_id="unknown",
+                title="未知发布时间",
+                source_url="https://www.youtube.com/watch?v=unknown",
+                published_at=UNKNOWN_YOUTUBE_PUBLISHED_AT,
+            )
+        ],
+    )[0]
+    rss_published_at = datetime(2026, 6, 13, 5, 23, 38, tzinfo=timezone.utc)
+
+    merged = _merge_rss_video_metadata(
+        channel,
+        [unknown_video],
+        [
+            SimpleNamespace(
+                id="youtube:latest",
+                external_id="latest",
+                title="RSS 最新视频",
+                source_url="https://www.youtube.com/watch?v=latest",
+                published_at=rss_published_at,
+            )
+        ],
+    )
+
+    assert [video.id for video in merged] == ["youtube:latest", "youtube:unknown"]
 
 
 async def test_enrich_lightweight_youtube_videos_fills_metadata(monkeypatch) -> None:
