@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import os
 import sys
 from types import SimpleNamespace
 
@@ -232,6 +233,25 @@ def test_write_youtube_cookie_file_converts_cookie_header() -> None:
 
     assert ".youtube.com\tTRUE\t/\tTRUE\t0\tSID\tone" in text
     assert ".youtube.com\tTRUE\t/\tTRUE\t0\tHSID\ttwo" in text
+
+
+def test_write_youtube_cookie_file_closes_mkstemp_fd(monkeypatch, tmp_path) -> None:
+    opened_fds: list[int] = []
+
+    def fake_mkstemp(*, prefix: str, suffix: str):
+        path = tmp_path / f"{prefix}sample{suffix}"
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
+        opened_fds.append(fd)
+        return fd, str(path)
+
+    monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp.tempfile.mkstemp", fake_mkstemp)
+
+    path = _write_youtube_cookie_file("SID=one")
+    try:
+        with pytest.raises(OSError):
+            os.fstat(opened_fds[0])
+    finally:
+        path.unlink()
 
 
 def test_base_ytdlp_opts_includes_proxy_when_configured() -> None:

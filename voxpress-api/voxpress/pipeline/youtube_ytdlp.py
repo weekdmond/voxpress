@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import tempfile
 from contextlib import contextmanager
@@ -146,20 +147,29 @@ def _base_ytdlp_opts(proxy_url: str | None = None) -> dict[str, Any]:
 
 
 def _write_youtube_cookie_file(cookie_text: str) -> Path:
-    path = Path(tempfile.mkstemp(prefix="vp_youtube_cookies_", suffix=".txt")[1])
+    fd, raw_path = tempfile.mkstemp(prefix="vp_youtube_cookies_", suffix=".txt")
+    path = Path(raw_path)
     cookie_text = cookie_text.strip()
-    if cookie_text.startswith("# Netscape") or "\t" in cookie_text:
-        path.write_text(cookie_text)
-        return path
-
-    lines = ["# Netscape HTTP Cookie File"]
-    for pair in cookie_text.split(";"):
-        pair = pair.strip()
-        if not pair or "=" not in pair:
-            continue
-        key, value = pair.split("=", 1)
-        lines.append(f".youtube.com\tTRUE\t/\tTRUE\t0\t{key.strip()}\t{value.strip()}")
-    path.write_text("\n".join(lines))
+    try:
+        if cookie_text.startswith("# Netscape") or "\t" in cookie_text:
+            payload = cookie_text
+        else:
+            lines = ["# Netscape HTTP Cookie File"]
+            for pair in cookie_text.split(";"):
+                pair = pair.strip()
+                if not pair or "=" not in pair:
+                    continue
+                key, value = pair.split("=", 1)
+                lines.append(f".youtube.com\tTRUE\t/\tTRUE\t0\t{key.strip()}\t{value.strip()}")
+            payload = "\n".join(lines)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+    except Exception:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise
     return path
 
 

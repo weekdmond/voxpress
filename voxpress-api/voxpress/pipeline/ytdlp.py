@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import tempfile
 from datetime import datetime, timezone
@@ -26,21 +27,30 @@ def _write_cookie_file(cookie_text: str) -> Path:
     pre-load it. We write whatever the user pasted to a tempfile; if it doesn't
     already look like Netscape format, we convert the `k=v; k=v` line into one.
     """
-    path = Path(tempfile.mkstemp(prefix="vp_cookies_", suffix=".txt")[1])
+    fd, raw_path = tempfile.mkstemp(prefix="vp_cookies_", suffix=".txt")
+    path = Path(raw_path)
     cookie_text = cookie_text.strip()
-    if cookie_text.startswith("# Netscape"):
-        path.write_text(cookie_text)
-        return path
-
-    # Convert "a=1; b=2; ..." → Netscape format for .douyin.com
-    lines = ["# Netscape HTTP Cookie File"]
-    for pair in cookie_text.split(";"):
-        pair = pair.strip()
-        if not pair or "=" not in pair:
-            continue
-        k, v = pair.split("=", 1)
-        lines.append(f".douyin.com\tTRUE\t/\tFALSE\t0\t{k.strip()}\t{v.strip()}")
-    path.write_text("\n".join(lines))
+    try:
+        if cookie_text.startswith("# Netscape"):
+            payload = cookie_text
+        else:
+            # Convert "a=1; b=2; ..." to Netscape format for .douyin.com.
+            lines = ["# Netscape HTTP Cookie File"]
+            for pair in cookie_text.split(";"):
+                pair = pair.strip()
+                if not pair or "=" not in pair:
+                    continue
+                k, v = pair.split("=", 1)
+                lines.append(f".douyin.com\tTRUE\t/\tFALSE\t0\t{k.strip()}\t{v.strip()}")
+            payload = "\n".join(lines)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+    except Exception:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise
     return path
 
 
