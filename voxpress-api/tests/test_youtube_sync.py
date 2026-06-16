@@ -9,6 +9,7 @@ from voxpress.youtube_sync import (
     _merge_rss_video_metadata,
     _videos_from_rss,
     _videos_requiring_metadata_probe,
+    refresh_youtube_channel_by_id,
     upsert_youtube_video,
 )
 
@@ -182,6 +183,33 @@ async def test_enrich_lightweight_youtube_videos_fills_metadata(monkeypatch) -> 
     assert enriched[0].plays == 5400
     assert enriched[0].published_at is published_at
     assert enriched[0].channel is channel
+
+
+async def test_refresh_youtube_channel_falls_back_when_rss_fails(monkeypatch) -> None:
+    fallback_result = (object(), 5, [])
+    feed_calls: list[tuple[str, int | None, str | None]] = []
+    fallback_calls: list[tuple[str, int | None, bool]] = []
+
+    async def fake_proxy_url() -> str:
+        return "http://proxy.local:7890"
+
+    async def fake_fetch_channel_feed(channel_id: str, *, max_videos: int | None, proxy_url: str | None = None):
+        feed_calls.append((channel_id, max_videos, proxy_url))
+        raise RuntimeError("rss 404")
+
+    async def fake_sync_youtube_channel_by_id(channel_id: str, *, max_videos: int | None, prune_missing: bool):
+        fallback_calls.append((channel_id, max_videos, prune_missing))
+        return fallback_result
+
+    monkeypatch.setattr("voxpress.youtube_sync.load_youtube_proxy_url", fake_proxy_url)
+    monkeypatch.setattr("voxpress.youtube_sync.fetch_channel_feed", fake_fetch_channel_feed)
+    monkeypatch.setattr("voxpress.youtube_sync.sync_youtube_channel_by_id", fake_sync_youtube_channel_by_id)
+
+    result = await refresh_youtube_channel_by_id("UC123", max_videos=5, prune_missing=False)
+
+    assert result is fallback_result
+    assert feed_calls == [("UC123", 5, "http://proxy.local:7890")]
+    assert fallback_calls == [("UC123", 5, False)]
 
 
 def test_videos_requiring_metadata_probe_skips_rows_with_existing_metrics() -> None:

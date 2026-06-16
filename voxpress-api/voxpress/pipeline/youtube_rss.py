@@ -9,6 +9,10 @@ import httpx
 from voxpress.pipeline.youtube_url import youtube_video_pk
 
 _ATOM_NS = {"atom": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015"}
+_RSS_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_0) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
 
 
 class YouTubeRssError(RuntimeError):
@@ -29,9 +33,15 @@ async def fetch_channel_feed(
     *,
     timeout: float = 12.0,
     max_videos: int | None = None,
+    proxy_url: str | None = None,
 ) -> list[YouTubeRssVideo]:
     try:
-        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            trust_env=False,
+            proxy=proxy_url or None,
+            headers={"User-Agent": _RSS_USER_AGENT},
+        ) as client:
             r = await client.get(
                 "https://www.youtube.com/feeds/videos.xml",
                 params={"channel_id": channel_id},

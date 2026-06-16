@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Sequence
 from uuid import UUID
@@ -16,10 +17,13 @@ from voxpress.pipeline.youtube_ytdlp import (
     YouTubeChannelInfo,
     YouTubeVideoInfo,
     fetch_channel_videos,
+    load_youtube_proxy_url,
     probe_video,
     resolve_channel,
 )
 from voxpress.task_store import emit_task_create
+
+logger = logging.getLogger(__name__)
 
 
 async def sync_youtube_channel(
@@ -32,7 +36,11 @@ async def sync_youtube_channel(
     channel, videos = await fetch_channel_videos(url, max_videos=max_videos)
     if channel.channel_id:
         try:
-            rss_videos = await fetch_channel_feed(channel.channel_id, max_videos=max_videos)
+            rss_videos = await fetch_channel_feed(
+                channel.channel_id,
+                max_videos=max_videos,
+                proxy_url=await load_youtube_proxy_url(),
+            )
         except Exception:
             rss_videos = []
         if rss_videos:
@@ -85,7 +93,23 @@ async def refresh_youtube_channel_by_id(
     prune_missing: bool = False,
 ) -> tuple[Creator, int, list[UUID]]:
     """Refresh a known YouTube source from RSS without re-parsing the channel page."""
-    rss_videos = await fetch_channel_feed(channel_id, max_videos=max_videos)
+    try:
+        rss_videos = await fetch_channel_feed(
+            channel_id,
+            max_videos=max_videos,
+            proxy_url=await load_youtube_proxy_url(),
+        )
+    except Exception as exc:
+        logger.warning(
+            "youtube rss refresh failed, falling back to yt-dlp: channel_id=%s error=%s",
+            channel_id,
+            str(exc)[:200],
+        )
+        return await sync_youtube_channel_by_id(
+            channel_id,
+            max_videos=max_videos,
+            prune_missing=prune_missing,
+        )
     async with session_scope() as s:
         existing = await s.scalar(
             select(Creator).where(
