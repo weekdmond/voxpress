@@ -217,6 +217,16 @@ def _md_scalar(value: object | None) -> str:
     return str(value)
 
 
+def _format_duration(seconds: int | None) -> str:
+    if not seconds or seconds <= 0:
+        return "—"
+    minutes, sec = divmod(int(seconds), 60)
+    if minutes >= 60:
+        hours, minutes = divmod(minutes, 60)
+        return f"{hours}:{minutes:02d}:{sec:02d}"
+    return f"{minutes}:{sec:02d}"
+
+
 def _transcript_text(transcript: Transcript | None) -> tuple[str, str]:
     if not transcript:
         return "", "逐字稿"
@@ -258,7 +268,15 @@ def _build_claude_bundle(
         f"- 导出时间: {created_at.isoformat()}",
         f"- 文章数量: {len(rows)}",
         "",
-        "这份文件由 SpeechFolio 生成，供 Claude 读取多篇文章的原稿、来源和整理参考。",
+        "这份文件由 SpeechFolio 生成，供 Claude 读取原稿、来源信息和系统整理稿。",
+        "",
+        "## Claude 任务说明",
+        "",
+        "- 目标: 基于原稿和 SpeechFolio 当前整理稿做忠实整理优化，不是写微信公众号营销文，也不是摘要任务。",
+        "- 顺序: 先审阅当前整理稿，判断是否过度精简、结构松散、遗漏论证链或删掉关键例子，再参考逐字稿优化。",
+        "- 边界: 不串改观点，不新增事实，不杜撰案例、金句、数据或结论，不把原作者没有说过的内容写进去。",
+        "- 篇幅: 根据视频时长、逐字稿信息量和当前整理稿字数决定；10 分钟以上口播/博客内容应保留完整观点链、关键例子和推导过程，整理成篇幅合适的完整文章，而不是压缩成精简摘要。",
+        "- 允许: 删除口癖、重复、语气词和明显无效表达；调整段落顺序、标题层级和过渡句，让文章更清晰可读。",
         "",
     ]
     for idx, (article, creator, video, transcript) in enumerate(rows, start=1):
@@ -272,6 +290,8 @@ def _build_claude_bundle(
                 f"- 创作者: {creator.name} ({creator.handle})",
                 f"- 来源链接: {video.source_url}",
                 f"- 发布时间: {_md_scalar(article.published_at)}",
+                f"- 视频时长: {_format_duration(video.duration_sec)}",
+                f"- 当前整理稿字数: {article.word_count or '—'}",
                 f"- 主题: {', '.join(article.topics) if article.topics else '—'}",
                 f"- 标签: {', '.join(article.tags) if article.tags else '—'}",
                 f"- 实体: {_format_entities_md(article.entities)}",

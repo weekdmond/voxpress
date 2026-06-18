@@ -13,7 +13,7 @@ interface ClaudeShareDialogProps {
 }
 
 const DEFAULT_DETAIL =
-  '请先通读原稿包，保留事实、人物和机构名称，基于这些原稿写一篇结构清晰、适合公众号发布的中文文章。';
+  '请先通读原稿包和 SpeechFolio 当前整理稿，基于原稿做忠实整理优化：不串改观点，不新增事实，不杜撰，不写成微信公众号营销文。先判断当前整理稿的不足，再在保留原观点、论证链、关键例子和人物/机构名称的基础上调整结构、补足信息密度和阅读节奏。10 分钟以上的口播/博客内容应整理成篇幅合适的完整文章，而不是压缩成精简摘要；只删除口癖、重复和明显无效表达。';
 
 function absoluteApiUrl(path: string): string {
   return new URL(apiUrl(path), window.location.href).href;
@@ -35,20 +35,22 @@ function buildPrompt(
   const more =
     share.articles.length > 8 ? `\n...另有 ${share.articles.length - 8} 篇在原稿包中` : '';
   return [
-    '请阅读我从 SpeechFolio 分享的文章原稿包，然后基于这些原稿协助我写文章。',
+    '请阅读我从 SpeechFolio 分享的文章原稿包，然后基于原稿和系统整理稿协助我做忠实整理优化。',
     '',
     `原稿包文件: ${share.file_name}`,
     `下载链接: ${downloadUrl}`,
     `回写 API: ${writebackUrl}`,
     '',
     '如果当前会话已经附上 Markdown 文件，请直接读取附件；如果没有附件，请先通过下载链接获取原稿包。',
-    '完成重写后，请直接调用回写 API，把重写结果更新回 SpeechFolio，替换原来的文章。',
+    '任务边界：这不是公众号写作任务，也不是摘要任务。请不要新增原稿外的信息、案例、金句或结论。',
+    '工作顺序：先看 SpeechFolio 当前整理稿，判断它是否过度精简、结构松散、遗漏论证链或删掉关键例子，再基于原稿进行优化。',
+    '完成整理优化后，请直接调用回写 API，把优化结果更新回 SpeechFolio，替换原来的文章。',
     '回写请求体格式如下：',
     '{',
     '  "articles": [',
     '    {',
     '      "id": "文章 ID",',
-    '      "title": "重写后的标题",',
+    '      "title": "优化后的标题",',
     '      "summary": "一句话摘要",',
     '      "content_md": "# 标题\\n\\n> 摘要\\n\\n正文 Markdown",',
     '      "tags": ["标签1", "标签2"]',
