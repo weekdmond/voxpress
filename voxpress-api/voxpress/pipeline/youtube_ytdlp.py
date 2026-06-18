@@ -149,15 +149,15 @@ def _base_ytdlp_opts(proxy_url: str | None = None) -> dict[str, Any]:
     return opts
 
 
-def _youtube_js_runtimes() -> list[str]:
-    runtimes: list[str] = []
+def _youtube_js_runtimes() -> dict[str, dict[str, str]]:
+    runtimes: dict[str, dict[str, str]] = {}
     deno_path = shutil.which("deno")
     if deno_path:
-        runtimes.append(f"deno:{deno_path}")
+        runtimes["deno"] = {"path": deno_path}
     node_path = shutil.which("node")
     if node_path:
-        runtimes.append(f"node:{node_path}")
-    return runtimes or ["deno"]
+        runtimes["node"] = {"path": node_path}
+    return runtimes or {"deno": {}}
 
 
 def _write_youtube_cookie_file(cookie_text: str) -> Path:

@@ -270,7 +270,7 @@ def test_base_ytdlp_opts_enables_youtube_js_solver(monkeypatch) -> None:
 
     opts = _base_ytdlp_opts(None)
 
-    assert opts["js_runtimes"] == ["node:/usr/bin/node"]
+    assert opts["js_runtimes"] == {"node": {"path": "/usr/bin/node"}}
     assert opts["remote_components"] == ["ejs:github"]
 
 
