@@ -303,12 +303,14 @@ class TaskRunner:
             await self._set_task_detail(task_id, "YouTube 未检测到可用字幕，切换音频下载与 ASR 转写")
 
         audio_path = await self.prepare_audio(task_id)
-        audio_object_key = ctx.video.audio_object_key
-        if not audio_object_key:
+        stored_audio_object_key = ctx.video.audio_object_key
+        if not stored_audio_object_key:
             async with session_scope() as s:
                 current_video = await s.get(Video, ctx.video.id)
-                audio_object_key = current_video.audio_object_key if current_video is not None else None
-        if not audio_object_key and audio_path.exists():
+                stored_audio_object_key = (
+                    current_video.audio_object_key if current_video is not None else None
+                )
+        if not stored_audio_object_key and audio_path.exists():
             if not await media_store.is_enabled():
                 raise MediaStoreError("OSS 未配置，无法保存转写音频")
             try:

@@ -112,6 +112,79 @@ async def test_youtube_transcribe_falls_back_to_audio_when_subtitles_missing(mon
     ]
 
 
+async def test_youtube_audio_fallback_archives_audio_without_shadowing_key_builder(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    runner = TaskRunner()
+    source_url = "https://www.youtube.com/watch?v=KJ-efTR7WxM"
+    calls: list[str] = []
+
+    async def fake_load_video_context(_task_id):
+        return _youtube_context(source_url)
+
+    async def fake_fetch_transcript(_url: str):
+        return None
+
+    async def fake_prepare_audio(_task_id):
+        path = tmp_path / "youtube.m4a"
+        path.write_bytes(b"audio")
+        return path
+
+    async def fake_set_task_detail(_task_id, detail: str):
+        calls.append(detail)
+
+    class FakeSession:
+        async def get(self, *_args):
+            return None
+
+    class FakeSessionScope:
+        async def __aenter__(self):
+            return FakeSession()
+
+        async def __aexit__(self, *_args):
+            return None
+
+    class FakeMediaStore:
+        async def is_enabled(self) -> bool:
+            return True
+
+        async def upload_file(self, _path, *, object_key: str) -> str:
+            calls.append(f"upload:{object_key}")
+            return object_key
+
+    class FakeTranscriber:
+        async def transcribe(self, _audio_path, *, language: str = "zh", initial_prompt: str | None = None):
+            return TranscriptResult(segments=[(0, "音频兜底")])
+
+    async def fake_transcriber_backend():
+        return FakeTranscriber()
+
+    async def fake_current_whisper_language():
+        return "zh"
+
+    async def fake_build_initial_prompt(_task_id):
+        return None
+
+    monkeypatch.setattr(runner, "_load_video_context", fake_load_video_context)
+    monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp.fetch_transcript", fake_fetch_transcript)
+    monkeypatch.setattr(runner, "prepare_audio", fake_prepare_audio)
+    monkeypatch.setattr(runner, "_set_task_detail", fake_set_task_detail)
+    monkeypatch.setattr(runner, "_transcriber_backend", fake_transcriber_backend)
+    monkeypatch.setattr(runner, "current_whisper_language", fake_current_whisper_language)
+    monkeypatch.setattr(runner, "build_initial_prompt", fake_build_initial_prompt)
+    monkeypatch.setattr(runner_module, "media_store", FakeMediaStore())
+    monkeypatch.setattr(runner_module, "session_scope", lambda: FakeSessionScope())
+
+    transcript = await runner.transcribe_inline(uuid4())
+
+    assert transcript.raw_text == "音频兜底"
+    assert calls == [
+        "YouTube 未检测到可用字幕，切换音频下载与 ASR 转写",
+        "upload:youtube/audio/youtube:KJ-efTR7WxM.m4a",
+    ]
+
+
 async def test_youtube_transcribe_surfaces_subtitle_fetch_error_when_audio_disabled(monkeypatch) -> None:
     runner = TaskRunner()
     source_url = "https://www.youtube.com/watch?v=KJ-efTR7WxM"
