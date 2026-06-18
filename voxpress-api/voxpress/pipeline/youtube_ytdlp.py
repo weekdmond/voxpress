@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -140,10 +141,23 @@ def _base_ytdlp_opts(proxy_url: str | None = None) -> dict[str, Any]:
         "quiet": True,
         "no_warnings": True,
         "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
+        "js_runtimes": _youtube_js_runtimes(),
+        "remote_components": ["ejs:github"],
     }
     if proxy_url:
         opts["proxy"] = proxy_url
     return opts
+
+
+def _youtube_js_runtimes() -> list[str]:
+    runtimes: list[str] = []
+    deno_path = shutil.which("deno")
+    if deno_path:
+        runtimes.append(f"deno:{deno_path}")
+    node_path = shutil.which("node")
+    if node_path:
+        runtimes.append(f"node:{node_path}")
+    return runtimes or ["deno"]
 
 
 def _write_youtube_cookie_file(cookie_text: str) -> Path:
@@ -266,8 +280,6 @@ def _fetch_channel_videos_sync(
     cookie_text: str | None = None,
     proxy_url: str | None = None,
 ) -> tuple[YouTubeChannelInfo, list[YouTubeVideoInfo]]:
-    import yt_dlp
-
     with _youtube_cookie_opts(cookie_text) as cookie_opts:
         opts = {
             **_base_ytdlp_opts(proxy_url),

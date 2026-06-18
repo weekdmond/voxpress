@@ -259,6 +259,21 @@ def test_base_ytdlp_opts_includes_proxy_when_configured() -> None:
     assert "proxy" not in _base_ytdlp_opts("")
 
 
+def test_base_ytdlp_opts_enables_youtube_js_solver(monkeypatch) -> None:
+    def fake_which(name: str) -> str | None:
+        return {
+            "deno": None,
+            "node": "/usr/bin/node",
+        }.get(name)
+
+    monkeypatch.setattr("voxpress.pipeline.youtube_ytdlp.shutil.which", fake_which)
+
+    opts = _base_ytdlp_opts(None)
+
+    assert opts["js_runtimes"] == ["node:/usr/bin/node"]
+    assert opts["remote_components"] == ["ejs:github"]
+
+
 async def test_cookie_probe_uses_unprocessed_metadata(monkeypatch) -> None:
     calls: list[bool] = []
 
